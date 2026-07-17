@@ -287,15 +287,26 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
       const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
       const worklogAda = hasAnyValid(ocrResults);
       // Feedback simpel: hanya valid/tidak lengkap
-      if (!parsed.isValid) {
-        await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
-        console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (album) — ${ctx.from.username || ctx.from.first_name}`);
-      } else {
-        await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
-        console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (album, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
-      }
       if (supabase) {
-        await processCaptureMessage(ctx, caption, photoGroups, anchorId, claimed.map(m => m.message_id)).catch(e => console.error("DB err:", e));
+        const sourceIds = claimed.map(m => m.message_id);
+        if (parsed.isValid) {
+          const sent = await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+          const botReplyMsgId = sent?.message_id || null;
+          if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+          console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (album, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
+          await processCaptureMessage(ctx, caption, photoGroups, anchorId, sourceIds).catch(e => console.error("DB err:", e));
+        } else {
+          const sent = await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
+          const botReplyMsgId = sent?.message_id || null;
+          if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+          console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (album) — ${ctx.from.username || ctx.from.first_name}`);
+        }
+      } else {
+        if (!parsed.isValid) {
+          await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
+        } else {
+          await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+        }
       }
       const pd = { text: caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: claimed.map(m => m.message_id) };
       registerPendingFormat(ctx, anchorId, pd);
@@ -312,15 +323,20 @@ async function handleSoloWithCaption(ctx) {
   if (parsed) {
     const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
     const worklogAda = r === true;
+    let botReplyMsgId = null;
     if (!parsed.isValid) {
-      await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.`);
+      const sent = await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.`);
+      botReplyMsgId = sent?.message_id || null;
       console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
     } else {
-      await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid`);
+      const sent = await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid`);
+      botReplyMsgId = sent?.message_id || null;
       console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (foto+caption, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
     }
     if (supabase && parsed.isValid) {
-      await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, [ctx.message.message_id]).catch(e => console.error("DB err:", e));
+      const sourceIds = [ctx.message.message_id];
+      if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+      await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds).catch(e => console.error("DB err:", e));
     }
     registerPendingFormat(ctx, ctx.message.message_id, {
       text: ctx.message.caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: [ctx.message.message_id],
@@ -362,7 +378,9 @@ async function handleTextOnly(ctx) {
     });
   }
   if (parsed.isValid && supabase) {
-    await processCaptureMessage(ctx, text, [], ctx.message.message_id, [ctx.message.message_id]).catch(e => console.error("DB err:", e));
+    const sourceIds = [ctx.message.message_id];
+    if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+    await processCaptureMessage(ctx, text, [], ctx.message.message_id, sourceIds).catch(e => console.error("DB err:", e));
   }
 }
 
@@ -374,7 +392,7 @@ bot.on(["text", "photo"], async (ctx) => {
   const hasCaption = !!ctx.message.caption;
   const repliedMsg = ctx.message.reply_to_message;
 
-  // HANDLE: Reply foto ke pesan format sebelumnya → NO FEEDBACK, proses diam-diam
+  // HANDLE: Reply foto → UPDATE existing record's photo_urls, NO FEEDBACK
   if (repliedMsg && !hasCaption && !mediaGroupId) {
     const replyKey = `${ctx.chat.id}_${ctx.from.id}_${repliedMsg.message_id}`;
     const pending = formatPendingPhotos.get(replyKey);
@@ -383,9 +401,35 @@ bot.on(["text", "photo"], async (ctx) => {
       const r = await doOCR(ctx, ctx.message.photo);
       console.log(`[REPLY PHOTO] Foto reply ke format ${pending.formatType}, worklog=${r === true} — ${ctx.from.username || ctx.from.first_name}`);
       if (supabase) {
-        const parsed = parseCaptureText(pending.text);
-        if (parsed?.isValid) {
-          await processCaptureMessage(ctx, pending.text, [ctx.message.photo], ctx.message.message_id, [...pending.sourceIds, ctx.message.message_id]).catch(e => console.error("DB err:", e));
+        // Cari ticket_id dari capture_ticket_messages via replied message_id
+        const { data: tm } = await supabase
+          .from("capture_ticket_messages")
+          .select("ticket_id, format_type")
+          .eq("chat_id", ctx.chat.id)
+          .eq("message_id", repliedMsg.message_id)
+          .maybeSingle();
+        if (tm) {
+          const tableName = TABLE_FOR_FORMAT[tm.format_type];
+          try {
+            const url = await uploadTelegramPhoto(ctx, ctx.message.photo);
+            // Ambil photo_urls existing, lalu append
+            const { data: existingRow } = await supabase
+              .from(tableName)
+              .select("photo_urls")
+              .eq("id", tm.ticket_id)
+              .maybeSingle();
+            if (existingRow) {
+              const oldUrls = Array.isArray(existingRow.photo_urls) ? existingRow.photo_urls : [];
+              const newUrls = [...oldUrls, url];
+              await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
+              console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
+            }
+          } catch (err) {
+            console.error(`[REPLY PHOTO] Gagal upload/update foto:`, err);
+          }
+        } else {
+          // Fallback: pakai pending data (kalau capture_ticket_messages blum tersimpan)
+          console.log(`[REPLY PHOTO] No capture_ticket_messages entry for msg ${repliedMsg.message_id}, fallback skipped`);
         }
       }
       return;
