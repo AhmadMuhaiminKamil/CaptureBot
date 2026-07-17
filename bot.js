@@ -40,6 +40,37 @@ const LABEL_FOR_FORMAT = {
   ognok:   "OG NOK",
 };
 
+// Template format untuk pesan error validasi (sesuai capture_bot reference)
+const FORMAT_TEMPLATE = {
+  binding: [
+    "Capture (Jika SC, Tampilkan TGL Create SC): (capture / required)",
+    "No Tiket: (required)",
+    "No Service: (required)",
+    "CLID lama, CLID baru, Domain: (required)",
+    "CLID Lama: Wajib",
+    "CLID Baru: Wajib",
+    "Domain: Wajib",
+    "Alasan Binding: (required)",
+  ].join("\n"),
+  gno: [
+    "No Tiket: (required)",
+    "No Service: (required)",
+    "Keterangan, Password: (required)",
+  ].join("\n"),
+  routing: [
+    "Capture: (optional)",
+    "No Tiket: (required)",
+    "No Service: (required)",
+    "Ket. GPON/MSAN: (required)",
+  ].join("\n"),
+  ognok: [
+    "Capture: (optional)",
+    "No Tiket: (required)",
+    "No Service: (required)",
+    "Keterangan: (required)",
+  ].join("\n"),
+};
+
 const COLUMNS_FOR_FORMAT = {
   binding: new Set([
     "telegram_user_id", "telegram_username", "telegram_chat_id",
@@ -85,7 +116,11 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (!parsed) return null; // Format tidak dikenal — silent, no feedback
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
   if (!parsed.isValid) {
-    return await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak valid.`);
+    return await replyTo(ctx, anchorId,
+      `❌ Format ${formatLabel} tidak valid.\\n\\n` +
+      `Format yang benar untuk ${formatLabel}:\\n\\n` +
+      FORMAT_TEMPLATE[parsed.formatType]
+    );
   }
   if (worklogAda === null) {
     // Teks aja, gak ada foto buat OCR
@@ -164,7 +199,9 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
   let sentMsg;
   if (!parsed.isValid) {
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `❌ Format ${formatLabel} tidak valid.`
+      `❌ Format ${formatLabel} tidak valid.\\n\\n` +
+      `Format yang benar untuk ${formatLabel}:\\n\\n` +
+      FORMAT_TEMPLATE[parsed.formatType]
     );
     console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak valid — ${ctx.from.username || ctx.from.first_name}`);
   } else {
