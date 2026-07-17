@@ -40,36 +40,6 @@ const LABEL_FOR_FORMAT = {
   ognok:   "OG NOK",
 };
 
-const FORMAT_TEMPLATE = {
-  binding: [
-    "Capture (Jika SC, Tampilkan TGL Create SC): (capture / required)",
-    "No Tiket: (required — lapsung atau INC...)",
-    "No Service: (required)",
-    "CLID lama, CLID baru, Domain: (required)",
-    "CLID Lama: Wajib",
-    "CLID Baru: Wajib",
-    "Domain: Wajib",
-    "Alasan Binding: (required)",
-  ].join("\n"),
-  gno: [
-    "No Tiket: (optional)",
-    "No Service: (required)",
-    "Keterangan, Password: (required)",
-  ].join("\n"),
-  routing: [
-    "Capture: (optional)",
-    "No Tiket: (optional)",
-    "No Service: (required)",
-    "Ket. GPON/MSAN: (required)",
-  ].join("\n"),
-  ognok: [
-    "Capture: (optional)",
-    "No Tiket: (optional)",
-    "No Service: (required)",
-    "Keterangan: (required)",
-  ].join("\n"),
-};
-
 const COLUMNS_FOR_FORMAT = {
   binding: new Set([
     "telegram_user_id", "telegram_username", "telegram_chat_id",
@@ -171,8 +141,8 @@ bot.command(["bantuan", "help"], (ctx) => {
   );
 });
 
-// ── FORMAT CAPTURE ────────────────────────────
-
+// ── FORMAT VALIDATION FEEDBACK ────────────────
+// Hanya 2 kemungkinan feedback — simpel
 async function handleFormatValidation(ctx, text, replyToMessageId) {
   const parsed = parseCaptureText(text);
   if (!parsed) return null;
@@ -182,13 +152,14 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
   let sentMsg;
   if (!parsed.isValid) {
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `❌ Format ${formatLabel} tidak lengkap.\n\n` +
-      `Format yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`
+      `❌ Format ${formatLabel} tidak lengkap.`
     );
+    console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap — ${ctx.from.username || ctx.from.first_name}`);
   } else {
     sentMsg = await replyTo(ctx, replyToMessageId,
       `✅ Format ${formatLabel} valid`
     );
+    console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid — ${ctx.from.username || ctx.from.first_name}`);
   }
   return sentMsg?.message_id || null;
 }
@@ -290,6 +261,7 @@ async function bufferPollLoop(ctx, bufferKey) {
   memBatchBuffer.delete(bufferKey);
   return batch;
 }
+
 // ── HANDLE: FORWARDED ALBUM + CAPTION ──────
 async function handleForwardedAlbum(ctx, mediaGroupId) {
   const bufferKey = `mg_${mediaGroupId}`;
@@ -314,10 +286,13 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
     if (parsed) {
       const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
       const worklogAda = hasAnyValid(ocrResults);
+      // Feedback simpel: hanya valid/tidak lengkap
       if (!parsed.isValid) {
-        await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
+        await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
+        console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (album) — ${ctx.from.username || ctx.from.first_name}`);
       } else {
-        await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+        await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+        console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (album, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
       }
       if (supabase) {
         await processCaptureMessage(ctx, caption, photoGroups, anchorId, claimed.map(m => m.message_id)).catch(e => console.error("DB err:", e));
@@ -336,11 +311,13 @@ async function handleSoloWithCaption(ctx) {
   const parsed = parseCaptureText(ctx.message.caption);
   if (parsed) {
     const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+    const worklogAda = r === true;
     if (!parsed.isValid) {
-      await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
+      await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.`);
+      console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
     } else {
-      const worklogAda = r === true;
-      await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+      await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid`);
+      console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (foto+caption, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
     }
     if (supabase && parsed.isValid) {
       await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, [ctx.message.message_id]).catch(e => console.error("DB err:", e));
@@ -396,28 +373,25 @@ bot.on(["text", "photo"], async (ctx) => {
   const mediaGroupId = ctx.message.media_group_id;
   const hasCaption = !!ctx.message.caption;
   const repliedMsg = ctx.message.reply_to_message;
+
+  // HANDLE: Reply foto ke pesan format sebelumnya → NO FEEDBACK, proses diam-diam
   if (repliedMsg && !hasCaption && !mediaGroupId) {
     const replyKey = `${ctx.chat.id}_${ctx.from.id}_${repliedMsg.message_id}`;
     const pending = formatPendingPhotos.get(replyKey);
     if (pending) {
       formatPendingPhotos.delete(replyKey);
       const r = await doOCR(ctx, ctx.message.photo);
-      const isNowValid = r === true;
-      const parsed = parseCaptureText(pending.text);
-      const formatLabel = parsed ? (LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType) : '';
-      if (parsed) {
-        if (!parsed.isValid) {
-          await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
-        } else {
-          await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${isNowValid ? 'ada' : 'tidak ada'})`);
+      console.log(`[REPLY PHOTO] Foto reply ke format ${pending.formatType}, worklog=${r === true} — ${ctx.from.username || ctx.from.first_name}`);
+      if (supabase) {
+        const parsed = parseCaptureText(pending.text);
+        if (parsed?.isValid) {
+          await processCaptureMessage(ctx, pending.text, [ctx.message.photo], ctx.message.message_id, [...pending.sourceIds, ctx.message.message_id]).catch(e => console.error("DB err:", e));
         }
-      }
-      if (supabase && parsed?.isValid) {
-        await processCaptureMessage(ctx, pending.text, [ctx.message.photo], ctx.message.message_id, [...pending.sourceIds, ctx.message.message_id]);
       }
       return;
     }
   }
+
   if (mediaGroupId) { await handleForwardedAlbum(ctx, mediaGroupId); return; }
   if (hasCaption) { await handleSoloWithCaption(ctx); return; }
   await handleSoloNoCaption(ctx);
