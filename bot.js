@@ -114,18 +114,19 @@ function replyTo(ctx, replyToMessageId, text, extra = {}) {
 async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (!parsed) return null; // Format tidak dikenal — silent, no feedback
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+  const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
   if (!parsed.isValid) {
     return await replyTo(ctx, anchorId,
-      `❌ Format ${formatLabel} tidak valid.\\n\\n` +
-      `Format yang benar untuk ${formatLabel}:\\n\\n` +
+      `❌ Format ${formatLabel} tidak valid. ${sender}\n\n` +
+      `Format yang benar untuk ${formatLabel}:\n\n` +
       FORMAT_TEMPLATE[parsed.formatType]
     );
   }
   if (worklogAda === null) {
     // Teks aja, gak ada foto buat OCR
-    return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+    return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
-  return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+  return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'}). ${sender}`);
 }
 
 function filterColumnsForFormat(data, formatType) {
@@ -194,19 +195,20 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
   if (!parsed) return null; // Format gak dikenal — silent
 
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+  const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
 
   let sentMsg;
   if (!parsed.isValid) {
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `❌ Format ${formatLabel} tidak valid.\\n\\n` +
-      `Format yang benar untuk ${formatLabel}:\\n\\n` +
+      `❌ Format ${formatLabel} tidak valid. ${sender}\n\n` +
+      `Format yang benar untuk ${formatLabel}:\n\n` +
       FORMAT_TEMPLATE[parsed.formatType]
     );
     console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak valid — ${ctx.from.username || ctx.from.first_name}`);
   } else {
     // Teks aja — gak ada foto, jadi gak ada worklog status
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `✅ Format ${formatLabel} valid`
+      `✅ Format ${formatLabel} valid. ${sender}`
     );
     console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid — ${ctx.from.username || ctx.from.first_name}`);
   }
