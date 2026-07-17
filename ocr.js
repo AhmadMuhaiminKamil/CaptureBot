@@ -113,6 +113,22 @@ async function preprocessImage(imageBytes) {
   return buffers;
 }
 
+// ── CORE PATH RESOLUTION ──────────────────────────
+
+function getCorePath() {
+  const candidates = [
+    path.join(process.cwd(), "api", "tesseract.js-core"),
+    path.join(process.cwd(), "api", "_core"),
+    path.join(process.cwd(), "node_modules", "tesseract.js-core"),
+  ];
+  for (const p of candidates) {
+    const wasmFile = path.join(p, "tesseract-core-simd.wasm");
+    if (fs.existsSync(wasmFile)) return p;
+  }
+  // fallback: let tesseract.js resolve itself
+  return undefined;
+}
+
 // ── LANG PATH RESOLUTION ──────────────────────────
 
 function getLangPath() {
@@ -141,9 +157,11 @@ export async function extractTextFromImage(imageBytes) {
   // Try zone-based OCR first
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
+    const corePath = getCorePath();
     const worker = await createWorker("eng", 1, {
       logger: () => {},
       langPath,
+      corePath,
     });
 
     let allText = "";
@@ -163,9 +181,11 @@ export async function extractTextFromImage(imageBytes) {
 
   // Fallback: direct OCR on full image
   try {
+    const corePath = getCorePath();
     const worker = await createWorker("eng", 1, {
       logger: () => {},
       langPath,
+      corePath,
     });
     try {
       const { data: { text } } = await worker.recognize(imageBytes);
