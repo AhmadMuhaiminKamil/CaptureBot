@@ -81,6 +81,22 @@ function replyTo(ctx, replyToMessageId, text, extra = {}) {
   return ctx.reply(text, { ...replyExtra, ...extra });
 }
 
+async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
+  if (!parsed) {
+    // Format tidak dikenal
+    return await replyTo(ctx, anchorId, `❌ Format tidak dikenal.`);
+  }
+  const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+  if (!parsed.isValid) {
+    return await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
+  }
+  if (worklogAda === null) {
+    // Teks aja, gak ada foto buat OCR
+    return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+  }
+  return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+}
+
 function filterColumnsForFormat(data, formatType) {
   const allowed = COLUMNS_FOR_FORMAT[formatType];
   if (!allowed) return data;
@@ -141,11 +157,15 @@ bot.command(["bantuan", "help"], (ctx) => {
   );
 });
 
-// ── FORMAT VALIDATION FEEDBACK ────────────────
-// Hanya 2 kemungkinan feedback — simpel
+// ── FORMAT VALIDATION FEEDBACK (text-only) ────
 async function handleFormatValidation(ctx, text, replyToMessageId) {
   const parsed = parseCaptureText(text);
-  if (!parsed) return null;
+  if (!parsed) {
+    // Format gak dikenal
+    const sent = await replyTo(ctx, replyToMessageId, `❌ Format tidak dikenal.`);
+    console.log(`[FEEDBACK] ❌ Format tidak dikenal — ${ctx.from.username || ctx.from.first_name}`);
+    return sent?.message_id || null;
+  }
 
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
 
@@ -156,6 +176,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     );
     console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap — ${ctx.from.username || ctx.from.first_name}`);
   } else {
+    // Teks aja — gak ada foto, jadi gak ada worklog status
     sentMsg = await replyTo(ctx, replyToMessageId,
       `✅ Format ${formatLabel} valid`
     );
@@ -279,37 +300,22 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
     const r = await doOCR(ctx, m.photo);
     ocrResults.push(r);
   }
-  const validCount = ocrResults.filter(r => r === true).length;
-  const totalCount = ocrResults.length;
+  const worklogAda = hasAnyValid(ocrResults);
   if (caption) {
     const parsed = parseCaptureText(caption);
+    const sent = await replyFormatFeedback(ctx, anchorId, parsed, worklogAda);
+    const botReplyMsgId = sent?.message_id || null;
+    console.log(`[FEEDBACK] ${parsed?.isValid ? '✅' : '❌'} Format ${parsed?.formatType || 'unknown'} (album) — ${ctx.from.username || ctx.from.first_name}`);
+    if (parsed?.isValid && supabase) {
+      const sourceIds = claimed.map(m => m.message_id);
+      if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+      await processCaptureMessage(ctx, caption, photoGroups, anchorId, sourceIds).catch(e => console.error("DB err:", e));
+    }
     if (parsed) {
-      const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
-      const worklogAda = hasAnyValid(ocrResults);
-      // Feedback simpel: hanya valid/tidak lengkap
-      if (supabase) {
-        const sourceIds = claimed.map(m => m.message_id);
-        if (parsed.isValid) {
-          const sent = await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
-          const botReplyMsgId = sent?.message_id || null;
-          if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-          console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (album, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
-          await processCaptureMessage(ctx, caption, photoGroups, anchorId, sourceIds).catch(e => console.error("DB err:", e));
-        } else {
-          const sent = await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
-          const botReplyMsgId = sent?.message_id || null;
-          if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-          console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (album) — ${ctx.from.username || ctx.from.first_name}`);
-        }
-      } else {
-        if (!parsed.isValid) {
-          await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
-        } else {
-          await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
-        }
-      }
-      const pd = { text: caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: claimed.map(m => m.message_id) };
-      registerPendingFormat(ctx, anchorId, pd);
+      registerPendingFormat(ctx, anchorId, {
+        text: caption, formatType: parsed.formatType, validCount: ocrResults.filter(r => r === true).length,
+        totalCount: ocrResults.length, sourceIds: claimed.map(m => m.message_id),
+      });
     }
   }
 }
@@ -317,29 +323,19 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
 // ── HANDLE: SOLO FOTO + CAPTION ────────────
 async function handleSoloWithCaption(ctx) {
   const r = await doOCR(ctx, ctx.message.photo);
-  const validCount = r === true ? 1 : 0;
-  const totalCount = 1;
   const parsed = parseCaptureText(ctx.message.caption);
+  const sent = await replyFormatFeedback(ctx, ctx.message.message_id, parsed, r === true);
+  const botReplyMsgId = sent?.message_id || null;
+  console.log(`[FEEDBACK] ${parsed?.isValid ? '✅' : '❌'} Format ${parsed?.formatType || 'unknown'} (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
+  if (parsed?.isValid && supabase) {
+    const sourceIds = [ctx.message.message_id];
+    if (botReplyMsgId) sourceIds.push(botReplyMsgId);
+    await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds).catch(e => console.error("DB err:", e));
+  }
   if (parsed) {
-    const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
-    const worklogAda = r === true;
-    let botReplyMsgId = null;
-    if (!parsed.isValid) {
-      const sent = await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.`);
-      botReplyMsgId = sent?.message_id || null;
-      console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
-    } else {
-      const sent = await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
-      botReplyMsgId = sent?.message_id || null;
-      console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (foto+caption, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
-    }
-    if (supabase && parsed.isValid) {
-      const sourceIds = [ctx.message.message_id];
-      if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-      await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds).catch(e => console.error("DB err:", e));
-    }
     registerPendingFormat(ctx, ctx.message.message_id, {
-      text: ctx.message.caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: [ctx.message.message_id],
+      text: ctx.message.caption, formatType: parsed.formatType, validCount: r === true ? 1 : 0, totalCount: 1,
+      sourceIds: [ctx.message.message_id],
     });
   }
 }
@@ -366,7 +362,17 @@ async function handleTextOnly(ctx) {
   const text = ctx.message.text;
   if (text.startsWith("/")) return;
   const parsed = parseCaptureText(text);
-  if (!parsed) return;
+  if (!parsed) {
+    // Format tidak dikenal — kasih feedback
+    const sent = await replyTo(ctx, ctx.message.message_id, `❌ Format tidak dikenal.`);
+    console.log(`[FEEDBACK] ❌ Format tidak dikenal (teks) — ${ctx.from.username || ctx.from.first_name}`);
+    if (sent?.message_id) {
+      registerPendingFormat(ctx, sent.message_id, {
+        text, formatType: null, validCount: 0, totalCount: 0, sourceIds: [ctx.message.message_id, sent.message_id],
+      });
+    }
+    return;
+  }
   registerPendingFormat(ctx, ctx.message.message_id, {
     text, formatType: parsed.formatType, validCount: 0, totalCount: 0, sourceIds: [ctx.message.message_id],
   });
@@ -401,7 +407,6 @@ bot.on(["text", "photo"], async (ctx) => {
       const r = await doOCR(ctx, ctx.message.photo);
       console.log(`[REPLY PHOTO] Foto reply ke format ${pending.formatType}, worklog=${r === true} — ${ctx.from.username || ctx.from.first_name}`);
       if (supabase) {
-        // Cari ticket_id dari capture_ticket_messages via replied message_id
         const { data: tm } = await supabase
           .from("capture_ticket_messages")
           .select("ticket_id, format_type")
@@ -412,7 +417,6 @@ bot.on(["text", "photo"], async (ctx) => {
           const tableName = TABLE_FOR_FORMAT[tm.format_type];
           try {
             const url = await uploadTelegramPhoto(ctx, ctx.message.photo);
-            // Ambil photo_urls existing, lalu append
             const { data: existingRow } = await supabase
               .from(tableName)
               .select("photo_urls")
@@ -428,7 +432,6 @@ bot.on(["text", "photo"], async (ctx) => {
             console.error(`[REPLY PHOTO] Gagal upload/update foto:`, err);
           }
         } else {
-          // Fallback: pakai pending data (kalau capture_ticket_messages blum tersimpan)
           console.log(`[REPLY PHOTO] No capture_ticket_messages entry for msg ${repliedMsg.message_id}, fallback skipped`);
         }
       }
