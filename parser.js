@@ -306,16 +306,12 @@ function parseGno(text) {
   raw.nomor_tiket = nomor_tiket;
 
   const isValid =
-    Boolean(rawNoTiket) &&
     Boolean(raw.no_service) &&
     Boolean(raw.keterangan);
 
-  let invalidReason = null;
-  if (!isValid) {
-    if (!rawNoTiket) invalidReason = "missing_no_tiket";
-    else if (!raw.no_service) invalidReason = "missing_no_service";
-    else invalidReason = "missing_keterangan";
-  }
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_keterangan")
+    : null;
 
   return { data: raw, isValid, invalidReason };
 }
@@ -332,16 +328,12 @@ function parseRouting(text) {
   raw.nomor_tiket = nomor_tiket;
 
   const isValid =
-    Boolean(rawNoTiket) &&
     Boolean(raw.no_service) &&
     Boolean(raw.ket_gpon_msan);
 
-  let invalidReason = null;
-  if (!isValid) {
-    if (!rawNoTiket) invalidReason = "missing_no_tiket";
-    else if (!raw.no_service) invalidReason = "missing_no_service";
-    else invalidReason = "missing_ket_gpon_msan";
-  }
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_ket_gpon_msan")
+    : null;
 
   return { data: raw, isValid, invalidReason };
 }
@@ -358,16 +350,12 @@ function parseOgnok(text) {
   raw.nomor_tiket = nomor_tiket;
 
   const isValid =
-    Boolean(rawNoTiket) &&
     Boolean(raw.no_service) &&
     Boolean(raw.keterangan);
 
-  let invalidReason = null;
-  if (!isValid) {
-    if (!rawNoTiket) invalidReason = "missing_no_tiket";
-    else if (!raw.no_service) invalidReason = "missing_no_service";
-    else invalidReason = "missing_keterangan";
-  }
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_keterangan")
+    : null;
 
   return { data: raw, isValid, invalidReason };
 }

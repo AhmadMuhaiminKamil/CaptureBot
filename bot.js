@@ -40,33 +40,34 @@ const LABEL_FOR_FORMAT = {
   ognok:   "OG NOK",
 };
 
-// Template format untuk pesan error validasi (sesuai capture_bot reference)
+// Template format untuk pesan error validasi (sama persis seperti capture_bot)
 const FORMAT_TEMPLATE = {
   binding: [
-    "Capture (Jika SC, Tampilkan TGL Create SC): *wajib*",
-    "No Tiket: *wajib*",
-    "No Service: *wajib*",
-    "CLID Lama: *wajib*",
-    "CLID Baru: *wajib*",
-    "Domain: *wajib*",
-    "Alasan Binding: *wajib*",
+    "Capture (Jika SC, Tampilkan TGL Create SC): (capture / required)",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "CLID lama, CLID baru, Domain: (required)",
+    "CLID Lama: Wajib",
+    "CLID Baru: Wajib",
+    "Domain: Wajib",
+    "Alasan Binding: (required)",
   ].join("\n"),
   gno: [
-    "No Tiket: *wajib*",
-    "No Service: *wajib*",
-    "Keterangan, Password: *wajib*",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Keterangan, Password: (required)",
   ].join("\n"),
   routing: [
-    "Capture: *opsional*",
-    "No Tiket: *wajib*",
-    "No Service: *wajib*",
-    "Ket. GPON/MSAN: *wajib*",
+    "Capture: (optional)",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Ket. GPON/MSAN: (required)",
   ].join("\n"),
   ognok: [
-    "Capture: *opsional*",
-    "No Tiket: *wajib*",
-    "No Service: *wajib*",
-    "Keterangan: *wajib*",
+    "Capture: (optional)",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Keterangan: (required)",
   ].join("\n"),
 };
 
