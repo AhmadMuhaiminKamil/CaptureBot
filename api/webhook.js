@@ -5,6 +5,18 @@ import bot from "../bot.js";
 import { waitUntil } from "@vercel/functions";
 
 export default async function handler(req, res) {
+  // CORS + preflight
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
+
+  // GET — health check
+  if (req.method === "GET") {
+    res.status(200).json({ ok: true, message: "Capture WorkLog Bot is running! 🤖" });
+    return;
+  }
+
   if (req.method !== "POST") {
     res.status(200).send("Webhook aktif, kirim POST dari Telegram di sini.");
     return;
