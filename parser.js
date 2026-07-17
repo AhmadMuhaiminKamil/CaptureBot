@@ -48,17 +48,14 @@ const OGNOK_FIELDS = [
 // ─────────────────────────────────────────────
 
 const FORMAT_SIGNATURES = [
-  // OG NOK — "Keterangan:" saja (tanpa ", Password" atau "GPON/MSAN")
-  { formatType: "ognok",    regex: /Keterangan\s*:/i },
-  // Routing
-  { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
-  // GNO — "Keterangan, Password:" atau "Keterangan & Password:" atau "Keterangan/Password:"
-  { formatType: "gno",      regex: /Keterangan\s*[,&\/]\s*Password\s*:/i },
-  // Binding — spesifik dulu
   { formatType: "binding",  regex: /Alasan\s*Binding\s*:/i },
   { formatType: "binding",  regex: /CLID\s*LAMA\s*:/i },
-  // "Alasan:" tanpa kata Binding — dicek paling akhir
+  // "Alasan :" tanpa kata Binding — valid jika ada CLID LAMA juga (dicek via CLID_LAMA di atas)
+  // Didaftarkan sebelum gno/ognok agar tidak salah tangkap
   { formatType: "binding",  regex: /(?:^|\n)\s*Alasan\s*:/im },
+  { formatType: "gno",      regex: /Keterangan\s*[,&\/]\s*Password\s*:/i },
+  { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
+  { formatType: "ognok",    regex: /Keterangan\s*:/i },
 ];
 
 function detectFormat(text) {

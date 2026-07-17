@@ -82,13 +82,10 @@ function replyTo(ctx, replyToMessageId, text, extra = {}) {
 }
 
 async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
-  if (!parsed) {
-    // Format tidak dikenal
-    return await replyTo(ctx, anchorId, `❌ Format tidak dikenal.`);
-  }
+  if (!parsed) return null; // Format tidak dikenal — silent, no feedback
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
   if (!parsed.isValid) {
-    return await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
+    return await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak valid.`);
   }
   if (worklogAda === null) {
     // Teks aja, gak ada foto buat OCR
@@ -160,21 +157,16 @@ bot.command(["bantuan", "help"], (ctx) => {
 // ── FORMAT VALIDATION FEEDBACK (text-only) ────
 async function handleFormatValidation(ctx, text, replyToMessageId) {
   const parsed = parseCaptureText(text);
-  if (!parsed) {
-    // Format gak dikenal
-    const sent = await replyTo(ctx, replyToMessageId, `❌ Format tidak dikenal.`);
-    console.log(`[FEEDBACK] ❌ Format tidak dikenal — ${ctx.from.username || ctx.from.first_name}`);
-    return sent?.message_id || null;
-  }
+  if (!parsed) return null; // Format gak dikenal — silent
 
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
 
   let sentMsg;
   if (!parsed.isValid) {
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `❌ Format ${formatLabel} tidak lengkap.`
+      `❌ Format ${formatLabel} tidak valid.`
     );
-    console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap — ${ctx.from.username || ctx.from.first_name}`);
+    console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak valid — ${ctx.from.username || ctx.from.first_name}`);
   } else {
     // Teks aja — gak ada foto, jadi gak ada worklog status
     sentMsg = await replyTo(ctx, replyToMessageId,
@@ -362,17 +354,7 @@ async function handleTextOnly(ctx) {
   const text = ctx.message.text;
   if (text.startsWith("/")) return;
   const parsed = parseCaptureText(text);
-  if (!parsed) {
-    // Format tidak dikenal — kasih feedback
-    const sent = await replyTo(ctx, ctx.message.message_id, `❌ Format tidak dikenal.`);
-    console.log(`[FEEDBACK] ❌ Format tidak dikenal (teks) — ${ctx.from.username || ctx.from.first_name}`);
-    if (sent?.message_id) {
-      registerPendingFormat(ctx, sent.message_id, {
-        text, formatType: null, validCount: 0, totalCount: 0, sourceIds: [ctx.message.message_id, sent.message_id],
-      });
-    }
-    return;
-  }
+  if (!parsed) return; // Format tidak dikenal — silent
   registerPendingFormat(ctx, ctx.message.message_id, {
     text, formatType: parsed.formatType, validCount: 0, totalCount: 0, sourceIds: [ctx.message.message_id],
   });
