@@ -290,7 +290,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
       if (supabase) {
         const sourceIds = claimed.map(m => m.message_id);
         if (parsed.isValid) {
-          const sent = await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+          const sent = await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
           const botReplyMsgId = sent?.message_id || null;
           if (botReplyMsgId) sourceIds.push(botReplyMsgId);
           console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (album, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
@@ -305,7 +305,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
         if (!parsed.isValid) {
           await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.`);
         } else {
-          await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid`);
+          await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
         }
       }
       const pd = { text: caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: claimed.map(m => m.message_id) };
@@ -329,7 +329,7 @@ async function handleSoloWithCaption(ctx) {
       botReplyMsgId = sent?.message_id || null;
       console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak lengkap (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
     } else {
-      const sent = await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid`);
+      const sent = await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
       botReplyMsgId = sent?.message_id || null;
       console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid (foto+caption, worklog ${worklogAda ? 'ada' : 'tidak ada'}) — ${ctx.from.username || ctx.from.first_name}`);
     }
