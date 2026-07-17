@@ -1,0 +1,442 @@
+// bot.js — Core Telegram bot
+import "dotenv/config";
+import { Telegraf } from "telegraf";
+import { createClient } from "@supabase/supabase-js";
+import { parseCaptureText } from "./parser.js";
+import { extractTextFromImage, validateWorklog, processPhotoOCR } from "./ocr.js";
+import { findSto } from "./stoMap.js";
+import sharp from "sharp";
+
+const { BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY } = process.env;
+
+if (!BOT_TOKEN) {
+  console.error("❌ BOT_TOKEN belum di-set");
+  throw new Error("Missing BOT_TOKEN");
+}
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn("⚠️  SUPABASE_URL / SUPABASE_KEY belum di-set — mode read-only (WorkLog OCR saja)");
+}
+
+const bot = new Telegraf(BOT_TOKEN);
+
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_KEY) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+}
+
+const PHOTO_BUCKET = "CaptureBinding_Images";
+
+const TABLE_FOR_FORMAT = {
+  binding: "binding_tickets",
+  gno:     "gno_tickets",
+  routing: "routing_tickets",
+  ognok:   "ognok_tickets",
+};
+
+const LABEL_FOR_FORMAT = {
+  binding: "Binding",
+  gno:     "GNO/REGFAIL/PELLPAS",
+  routing: "Routing",
+  ognok:   "OG NOK",
+};
+
+const FORMAT_TEMPLATE = {
+  binding: [
+    "Capture (Jika SC, Tampilkan TGL Create SC): (capture / required)",
+    "No Tiket: (required — lapsung atau INC...)",
+    "No Service: (required)",
+    "CLID lama, CLID baru, Domain: (required)",
+    "CLID Lama: Wajib",
+    "CLID Baru: Wajib",
+    "Domain: Wajib",
+    "Alasan Binding: (required)",
+  ].join("\n"),
+  gno: [
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Keterangan, Password: (required)",
+  ].join("\n"),
+  routing: [
+    "Capture: (optional)",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Ket. GPON/MSAN: (required)",
+  ].join("\n"),
+  ognok: [
+    "Capture: (optional)",
+    "No Tiket: (optional)",
+    "No Service: (required)",
+    "Keterangan: (required)",
+  ].join("\n"),
+};
+
+const COLUMNS_FOR_FORMAT = {
+  binding: new Set([
+    "telegram_user_id", "telegram_username", "telegram_chat_id",
+    "raw_text", "photo_urls", "jenis", "nomor_tiket", "no_service",
+    "clid_lama", "clid_baru", "domain", "alasan_binding", "sto_lama", "sto_baru",
+  ]),
+  gno: new Set([
+    "telegram_user_id", "telegram_username", "telegram_chat_id",
+    "raw_text", "photo_urls", "jenis", "nomor_tiket", "no_service", "keterangan", "sto",
+  ]),
+  routing: new Set([
+    "telegram_user_id", "telegram_username", "telegram_chat_id",
+    "raw_text", "photo_urls", "jenis", "nomor_tiket", "no_service", "ket_gpon_msan", "sto",
+  ]),
+  ognok: new Set([
+    "telegram_user_id", "telegram_username", "telegram_chat_id",
+    "raw_text", "photo_urls", "jenis", "nomor_tiket", "no_service", "keterangan", "sto",
+  ]),
+};
+
+// ── BUFFER & PENDING ─────────────────────────
+const memBatchBuffer = new Map();
+const MEM_BATCH_MAX_WAIT_MS = 6000;
+const MEM_BATCH_QUIET_ROUNDS = 2;
+const MEM_BATCH_POLL_MS = 600;
+
+const formatPendingPhotos = new Map();
+
+// ── HELPERS ───────────────────────────────────
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function replyTo(ctx, replyToMessageId, text, extra = {}) {
+  const replyExtra = replyToMessageId
+    ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } }
+    : {};
+  return ctx.reply(text, { ...replyExtra, ...extra });
+}
+
+function filterColumnsForFormat(data, formatType) {
+  const allowed = COLUMNS_FOR_FORMAT[formatType];
+  if (!allowed) return data;
+  return Object.fromEntries(Object.entries(data).filter(([k]) => allowed.has(k)));
+}
+
+function registerPendingFormat(ctx, anchorMsgId, pendingData) {
+  const key = `${ctx.chat.id}_${ctx.from.id}_${anchorMsgId}`;
+  formatPendingPhotos.set(key, { ...pendingData, createdAt: Date.now() });
+  setTimeout(() => formatPendingPhotos.delete(key), 2 * 60 * 1000);
+}
+
+// ── WORKLOG OCR ───────────────────────────────
+
+async function doOCR(ctx, photoArray) {
+  try {
+    const ocrResult = await processPhotoOCR(ctx, photoArray);
+    return ocrResult.validation.valid;
+  } catch (err) {
+    console.error("[OCR] Error:", err);
+    return null;
+  }
+}
+
+function hasAnyValid(results) {
+  return results.some(r => r === true);
+}
+
+// ── COMMANDS ──────────────────────────────────
+
+bot.start((ctx) =>
+  ctx.reply(
+    "👋 Halo! Saya bot Capture + WorkLog OCR.\n\n" +
+    "Forward pesan berisi foto screenshot WorkLog — saya akan OCR & validasi.\n" +
+    "Atau forward pesan berisi foto + teks format capture (Binding, GNO, Routing, OG NOK).\n\n" +
+    "Kirim /bantuan untuk info lebih lanjut."
+  )
+);
+
+bot.command("cek", (ctx) => {
+  ctx.reply("📸 Silakan kirim / forward foto screenshot WorkLog.");
+});
+
+bot.command(["bantuan", "help"], (ctx) => {
+  ctx.reply(
+    "📖 *Cara Penggunaan:*\n\n" +
+    "*1. Cek WorkLog (OCR)*\n" +
+    "Forward / kirim foto screenshot WorkLog → otomatis di-OCR & divalidasi.\n\n" +
+    "*2. Format Capture*\n" +
+    "Forward / kirim teks dengan format (boleh disertai foto):\n" +
+    "• *Binding* — No Service, CLID Lama/Baru, Domain, Alasan Binding\n" +
+    "• *GNO* — No Service, Keterangan & Password\n" +
+    "• *Routing* — No Service, Ket. GPON/MSAN\n" +
+    "• *OG NOK* — No Service, Keterangan\n\n" +
+    "/cek — Mulai cek WorkLog\n" +
+    "/bantuan — Bantuan ini",
+    { parse_mode: "Markdown" }
+  );
+});
+
+// ── FORMAT CAPTURE ────────────────────────────
+
+async function handleFormatValidation(ctx, text, replyToMessageId) {
+  const parsed = parseCaptureText(text);
+  if (!parsed) return null;
+
+  const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+
+  let sentMsg;
+  if (!parsed.isValid) {
+    sentMsg = await replyTo(ctx, replyToMessageId,
+      `❌ Format ${formatLabel} tidak lengkap.\n\n` +
+      `Format yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`
+    );
+  } else {
+    sentMsg = await replyTo(ctx, replyToMessageId,
+      `✅ Format ${formatLabel} valid`
+    );
+  }
+  return sentMsg?.message_id || null;
+}
+
+// ── UPLOAD ────────────────────────────────────
+
+const UPLOAD_MAX_RETRIES = 3;
+const UPLOAD_RETRY_DELAY_MS = 2000;
+
+async function uploadTelegramPhoto(ctx, photoArray) {
+  const largest = photoArray[photoArray.length - 1];
+  let lastError;
+  for (let attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    try {
+      const fileLink = await ctx.telegram.getFileLink(largest.file_id);
+      const response = await fetch(fileLink.href);
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const originalBuffer = Buffer.from(arrayBuffer);
+      const compressedBuffer = await sharp(originalBuffer)
+        .rotate().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 70, mozjpeg: true }).toBuffer();
+      const fileName = `${Date.now()}_${largest.file_id}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from(PHOTO_BUCKET).upload(fileName, compressedBuffer, { contentType: "image/jpeg", upsert: false });
+      if (uploadError) throw uploadError;
+      return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(fileName).data.publicUrl;
+    } catch (err) {
+      lastError = err;
+      console.error(`[UPLOAD] Attempt ${attempt} gagal:`, err.message);
+      if (attempt < UPLOAD_MAX_RETRIES) await sleep(UPLOAD_RETRY_DELAY_MS);
+    }
+  }
+  throw lastError;
+}
+
+// ── PROSES CAPTURE ────────────────────────────
+
+async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, sourceMessageIds = []) {
+  if (!supabase) return;
+  const senderName = ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ");
+  const parsed = parseCaptureText(text);
+  if (!parsed) return;
+  const { formatType } = parsed;
+  const tableName = TABLE_FOR_FORMAT[formatType];
+  if (!parsed.isValid) return;
+  let photo_urls = [];
+  if (Array.isArray(photoGroups) && photoGroups.length > 0) {
+    try {
+      for (const photoArray of photoGroups) {
+        const url = await uploadTelegramPhoto(ctx, photoArray);
+        photo_urls.push(url);
+      }
+    } catch (err) {
+      console.error(`Gagal upload foto (${senderName}):`, err);
+      return;
+    }
+  }
+  const rawRow = {
+    telegram_user_id: ctx.from.id, telegram_username: ctx.from.username || null,
+    telegram_chat_id: ctx.chat.id, raw_text: text,
+    photo_urls: photo_urls.length ? photo_urls : null,
+    ...parsed.data,
+  };
+
+  // Tambah STO dari no_service untuk format GNO/Routing/OG NOK
+  if (formatType !== "binding" && rawRow.no_service) {
+    const sto = findSto(rawRow.no_service);
+    rawRow.sto = sto || null;
+    console.log(`[STO] no_service=${rawRow.no_service} → sto=${sto || '(not found)'}`);
+  }
+
+  const row = filterColumnsForFormat(rawRow, formatType);
+  const { data, error } = await supabase.from(tableName).insert(row).select().single();
+  if (error) { console.error(`Supabase insert error (${senderName}):`, error); return; }
+  console.log(`[DB] Insert ke ${tableName} ID=${data.id} (${senderName})`);
+  await registerSubmissionMessages(ctx, data.id, formatType, [...sourceMessageIds]);
+}
+
+// ── BUFFER POLL ───────────────────────────────
+
+async function bufferPollLoop(ctx, bufferKey) {
+  const startedAt = Date.now();
+  let lastCount = null;
+  let quietRounds = 0;
+  while (Date.now() - startedAt < MEM_BATCH_MAX_WAIT_MS) {
+    await sleep(MEM_BATCH_POLL_MS);
+    const batch = memBatchBuffer.get(bufferKey);
+    if (!batch) return null;
+    if (lastCount !== null && batch.length === lastCount) {
+      quietRounds++;
+    } else {
+      quietRounds = 0;
+      lastCount = batch.length;
+    }
+    if (quietRounds >= MEM_BATCH_QUIET_ROUNDS) break;
+  }
+  const batch = memBatchBuffer.get(bufferKey);
+  memBatchBuffer.delete(bufferKey);
+  return batch;
+}
+// ── HANDLE: FORWARDED ALBUM + CAPTION ──────
+async function handleForwardedAlbum(ctx, mediaGroupId) {
+  const bufferKey = `mg_${mediaGroupId}`;
+  if (!memBatchBuffer.has(bufferKey)) memBatchBuffer.set(bufferKey, []);
+  const batch = memBatchBuffer.get(bufferKey);
+  batch.push(ctx.message);
+  if (batch[0].message_id !== ctx.message.message_id) return;
+  const claimed = await bufferPollLoop(ctx, bufferKey);
+  if (!claimed || !claimed.length) return;
+  const caption = claimed[0].caption;
+  const photoGroups = claimed.map(m => m.photo);
+  const anchorId = claimed[0].message_id;
+  const ocrResults = [];
+  for (const m of claimed) {
+    const r = await doOCR(ctx, m.photo);
+    ocrResults.push(r);
+  }
+  const validCount = ocrResults.filter(r => r === true).length;
+  const totalCount = ocrResults.length;
+  if (caption) {
+    const parsed = parseCaptureText(caption);
+    if (parsed) {
+      const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+      const worklogAda = hasAnyValid(ocrResults);
+      if (!parsed.isValid) {
+        await replyTo(ctx, anchorId, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
+      } else {
+        await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+      }
+      if (supabase) {
+        await processCaptureMessage(ctx, caption, photoGroups, anchorId, claimed.map(m => m.message_id)).catch(e => console.error("DB err:", e));
+      }
+      const pd = { text: caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: claimed.map(m => m.message_id) };
+      registerPendingFormat(ctx, anchorId, pd);
+    }
+  }
+}
+
+// ── HANDLE: SOLO FOTO + CAPTION ────────────
+async function handleSoloWithCaption(ctx) {
+  const r = await doOCR(ctx, ctx.message.photo);
+  const validCount = r === true ? 1 : 0;
+  const totalCount = 1;
+  const parsed = parseCaptureText(ctx.message.caption);
+  if (parsed) {
+    const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+    if (!parsed.isValid) {
+      await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
+    } else {
+      const worklogAda = r === true;
+      await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'})`);
+    }
+    if (supabase && parsed.isValid) {
+      await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, [ctx.message.message_id]).catch(e => console.error("DB err:", e));
+    }
+    registerPendingFormat(ctx, ctx.message.message_id, {
+      text: ctx.message.caption, formatType: parsed.formatType, validCount, totalCount, sourceIds: [ctx.message.message_id],
+    });
+  }
+}
+
+// ── HANDLE: SOLO FOTO (no caption) ─────────
+async function handleSoloNoCaption(ctx) {
+  await doOCR(ctx, ctx.message.photo); // bg only
+}
+
+// ── HANDLE: ALBUM FOTO (no caption) ─────────
+async function handleAlbumNoCaption(ctx, mediaGroupId) {
+  const bufferKey = `mg_${mediaGroupId}`;
+  if (!memBatchBuffer.has(bufferKey)) memBatchBuffer.set(bufferKey, []);
+  const batch = memBatchBuffer.get(bufferKey);
+  batch.push(ctx.message);
+  if (batch[0].message_id !== ctx.message.message_id) return;
+  const claimed = await bufferPollLoop(ctx, bufferKey);
+  if (!claimed || !claimed.length) return;
+  for (const m of claimed) { await doOCR(ctx, m.photo); }
+}
+
+// ── HANDLE: TEKS SAJA ──────────────────────
+async function handleTextOnly(ctx) {
+  const text = ctx.message.text;
+  if (text.startsWith("/")) return;
+  const parsed = parseCaptureText(text);
+  if (!parsed) return;
+  registerPendingFormat(ctx, ctx.message.message_id, {
+    text, formatType: parsed.formatType, validCount: 0, totalCount: 0, sourceIds: [ctx.message.message_id],
+  });
+  const botReplyMsgId = await handleFormatValidation(ctx, text, ctx.message.message_id);
+  if (botReplyMsgId) {
+    registerPendingFormat(ctx, botReplyMsgId, {
+      text, formatType: parsed.formatType, validCount: 0, totalCount: 0,
+      sourceIds: [ctx.message.message_id, botReplyMsgId],
+    });
+  }
+  if (parsed.isValid && supabase) {
+    await processCaptureMessage(ctx, text, [], ctx.message.message_id, [ctx.message.message_id]).catch(e => console.error("DB err:", e));
+  }
+}
+
+// ── MAIN HANDLER ───────────────────────────
+bot.on(["text", "photo"], async (ctx) => {
+  const isPhoto = Array.isArray(ctx.message.photo);
+  if (!isPhoto) { await handleTextOnly(ctx); return; }
+  const mediaGroupId = ctx.message.media_group_id;
+  const hasCaption = !!ctx.message.caption;
+  const repliedMsg = ctx.message.reply_to_message;
+  if (repliedMsg && !hasCaption && !mediaGroupId) {
+    const replyKey = `${ctx.chat.id}_${ctx.from.id}_${repliedMsg.message_id}`;
+    const pending = formatPendingPhotos.get(replyKey);
+    if (pending) {
+      formatPendingPhotos.delete(replyKey);
+      const r = await doOCR(ctx, ctx.message.photo);
+      const isNowValid = r === true;
+      const parsed = parseCaptureText(pending.text);
+      const formatLabel = parsed ? (LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType) : '';
+      if (parsed) {
+        if (!parsed.isValid) {
+          await replyTo(ctx, ctx.message.message_id, `❌ Format ${formatLabel} tidak lengkap.\n\nFormat yang benar:\n${FORMAT_TEMPLATE[parsed.formatType]}`);
+        } else {
+          await replyTo(ctx, ctx.message.message_id, `✅ Format ${formatLabel} valid (worklog ${isNowValid ? 'ada' : 'tidak ada'})`);
+        }
+      }
+      if (supabase && parsed?.isValid) {
+        await processCaptureMessage(ctx, pending.text, [ctx.message.photo], ctx.message.message_id, [...pending.sourceIds, ctx.message.message_id]);
+      }
+      return;
+    }
+  }
+  if (mediaGroupId) { await handleForwardedAlbum(ctx, mediaGroupId); return; }
+  if (hasCaption) { await handleSoloWithCaption(ctx); return; }
+  await handleSoloNoCaption(ctx);
+});
+
+// ── SUPABASE HELPERS ──────────────────────
+const STALE_BUFFER_MS = 2 * 60 * 1000;
+async function cleanupStaleBuffers() {
+  if (!supabase) return;
+  const staleBefore = new Date(Date.now() - STALE_BUFFER_MS).toISOString();
+  await supabase.from("photo_batch_buffer").delete().lt("created_at", staleBefore);
+  await supabase.from("pending_photo_buffer").delete().lt("updated_at", staleBefore);
+}
+async function registerSubmissionMessages(ctx, ticketId, formatType, messageIds) {
+  if (!supabase || !messageIds.length) return;
+  const rows = messageIds.filter(id => id != null).map(message_id => ({
+    chat_id: ctx.chat.id, message_id, ticket_id: ticketId, format_type: formatType,
+  }));
+  await supabase.from("capture_ticket_messages").upsert(rows, { onConflict: "chat_id,message_id" });
+}
+
+export default bot;

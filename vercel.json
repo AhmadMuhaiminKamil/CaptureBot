@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "buildCommand": "npm run vercel-build",
+  "functions": {
+    "api/webhook.js": {
+      "maxDuration": 60,
+      "includeFiles": "api/tesseract.js-core/**,api/_core/**,api/_worker/**,api/lang-data/**"
+    }
+  },
+  "routes": [
+    { "src": "/webhook", "dest": "/api/webhook.js" },
+    { "src": "/", "dest": "/api/webhook.js" }
+  ]
+}

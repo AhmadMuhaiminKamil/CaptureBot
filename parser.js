@@ -1,0 +1,392 @@
+// parser.js
+// Mengubah teks capture (format free-text dengan label) menjadi object terstruktur.
+// Mendukung 4 format: Binding, GNO/REGFAIL/PELLPAS, Routing, OG NOK.
+
+// ─────────────────────────────────────────────
+// FIELD DEFINITIONS PER FORMAT
+// ─────────────────────────────────────────────
+
+const BINDING_FIELDS = [
+  { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
+  { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
+  { key: "clid_lama",       regex: /CLID\s*LAMA\s*:\s*/i,                                            singleLine: true },
+  { key: "clid_baru",       regex: /CLID\s*BARU\s*:\s*/i,                                            singleLine: true },
+  { key: "domain",          regex: /Domain\s*:\s*/i,                                                  singleLine: true },
+  // Menerima: "Alasan Binding:", "Alasan:", "Keterangan:", "Ket.:", "Ket:"
+  // Anchor ke awal baris agar tidak salah match di tengah teks.
+  // Semua teks setelahnya (termasuk ODP lama/baru dll) masuk ke kolom ini.
+  // singleLine: false → boleh multiline (teks bebas panjang)
+  { key: "alasan_binding",  regex: /(?:^|\n)[ \t]*(?:Alasan\s*Binding|Alasan|Keterangan|Ket\.?)\s*:/im },
+];
+
+const GNO_FIELDS = [
+  { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
+  { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
+  // Label "Keterangan, Password:" atau "Keterangan & Password:" atau "Keterangan/Password:"
+  { key: "keterangan",      regex: /Keterangan\s*[,&\/]\s*Password\s*:\s*/i },
+];
+
+const ROUTING_FIELDS = [
+  { key: "capture",         regex: /Capture\s*:\s*/i,                                                 singleLine: true },
+  { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
+  { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
+  // "Ket. GPON/MSAN:" atau "Ket GPON/MSAN:" atau "Ket. GPON:" dll
+  { key: "ket_gpon_msan",   regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:\s*/i },
+];
+
+const OGNOK_FIELDS = [
+  { key: "capture",         regex: /Capture\s*:\s*/i,                                                 singleLine: true },
+  { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
+  { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
+  // "Keterangan:" saja (tanpa ", Password" atau "GPON/MSAN")
+  { key: "keterangan",      regex: /Keterangan\s*:\s*/i },
+];
+
+// ─────────────────────────────────────────────
+// FORMAT DETECTOR
+// Urutan pengecekan penting: yang paling spesifik dulu.
+// ─────────────────────────────────────────────
+
+const FORMAT_SIGNATURES = [
+  { formatType: "binding",  regex: /Alasan\s*Binding\s*:/i },
+  { formatType: "binding",  regex: /CLID\s*LAMA\s*:/i },
+  // "Alasan :" tanpa kata Binding — valid jika ada CLID LAMA juga (dicek via CLID_LAMA di atas)
+  // Didaftarkan sebelum gno/ognok agar tidak salah tangkap
+  { formatType: "binding",  regex: /(?:^|\n)\s*Alasan\s*:/im },
+  { formatType: "gno",      regex: /Keterangan\s*[,&\/]\s*Password\s*:/i },
+  { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
+  { formatType: "ognok",    regex: /Keterangan\s*:/i },
+];
+
+function detectFormat(text) {
+  for (const sig of FORMAT_SIGNATURES) {
+    if (sig.regex.test(text)) return sig.formatType;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────
+
+function stripMarkdownLink(value) {
+  return value.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+}
+
+const EMPTY_MARKERS = ["required", "optional", "capture / required", "capture / optional", "wajib", "-", ""];
+
+function normalizeForEmptyCheck(value) {
+  return value
+    .trim()
+    .replace(/^\(+/, "")
+    .replace(/\)+$/, "")
+    .trim()
+    .toLowerCase();
+}
+
+function stripInstructionalHeaders(text) {
+  let inlineDomain = null;
+
+  // Hanya hapus baris instruksional "CLID lama, CLID baru, Domain: ..."
+  // BUKAN baris data seperti "CLID LAMA: GPON 1 - A - B - 1"
+  const cleaned = text.replace(
+    /^[ \t]*CLID\s*lama\s*[,，]\s*CLID\s*baru\b[^\n]*/im,
+    (match) => {
+      // Extract domain inline dari baris ini sebagai fallback
+      const domainMatch = match.match(/Domain\s*:\s*(.+)/i);
+      if (domainMatch) {
+        inlineDomain = stripMarkdownLink(domainMatch[1]);
+        if (!inlineDomain) inlineDomain = null;
+      }
+      return ""; // hapus seluruh baris header
+    }
+  );
+
+  return { cleaned, inlineDomain };
+}
+
+const CLID_FORMAT_REGEX = /^GPON\s*\d+\s*-\s*[A-Za-z0-9]+\s*-\s*([A-Za-z]+)\s*-\s*\d+/i;
+
+function parseClid(clidValue) {
+  if (!clidValue) return { valid: false, sto: null };
+  const match = CLID_FORMAT_REGEX.exec(clidValue.trim());
+  if (!match) return { valid: false, sto: null };
+  return { valid: true, sto: match[1].toUpperCase() };
+}
+
+const LAPSUNG_ALIASES = ["lapsung", "langsung"];
+const CONTAINS_DIGIT = /\d/;
+
+function parseNoTiket(rawNoTiket) {
+  if (!rawNoTiket) return { jenis: null, nomor_tiket: null };
+
+  const normalized = rawNoTiket.trim().toLowerCase();
+
+  if (LAPSUNG_ALIASES.includes(normalized)) {
+    return { jenis: "Lapsung", nomor_tiket: null };
+  } else if (CONTAINS_DIGIT.test(rawNoTiket)) {
+    return { jenis: "Tiket", nomor_tiket: rawNoTiket };
+  } else {
+    const jenis = rawNoTiket
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return { jenis, nomor_tiket: null };
+  }
+}
+
+// ─────────────────────────────────────────────
+// GENERIC FIELD EXTRACTOR
+// ─────────────────────────────────────────────
+
+function extractFields(text, fieldDefs) {
+  const matches = [];
+
+  for (const field of fieldDefs) {
+    const m = field.regex.exec(text);
+    if (m) {
+      matches.push({
+        key: field.key,
+        start: m.index,
+        end: m.index + m[0].length,
+        singleLine: field.singleLine === true,
+      });
+    }
+  }
+
+  if (matches.length === 0) return null;
+
+  matches.sort((a, b) => a.start - b.start);
+
+  const result = {};
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].end;
+    const end = i + 1 < matches.length ? matches[i + 1].start : text.length;
+    let value = stripMarkdownLink(text.slice(start, end));
+
+    // Field single-line: hanya ambil sampai akhir baris pertama.
+    // Teks setelah newline (GANTI ONT, SN LAMA, dll) diabaikan di sini
+    // dan akan tertangkap oleh field berikutnya (biasanya alasan_binding).
+    if (matches[i].singleLine) {
+      value = value.split(/\r?\n/)[0];
+    }
+
+    if (EMPTY_MARKERS.includes(normalizeForEmptyCheck(value))) value = null;
+    result[matches[i].key] = value || null;
+  }
+
+  return result;
+}
+
+// ─────────────────────────────────────────────
+// FORMAT-SPECIFIC PARSERS
+// ─────────────────────────────────────────────
+
+// Ekstrak semua teks "ekstra" yang posisinya di antara baris pertama No Service
+// dan label CLID LAMA. Apapun isinya (GANTI ONT, GANTI GPI, FD LAMA/BARU,
+// SN LAMA/BARU, catatan bebas, dll) akan tertangkap dan di-append ke alasan_binding.
+// Pendekatan berbasis posisi — tidak bergantung pada keyword perangkat tertentu.
+function extractExtraBlock(text) {
+  // Temukan akhir baris pertama setelah "No Service:"
+  const noServiceMatch = /No\s*Service\s*:\s*[^\n]*/i.exec(text);
+  if (!noServiceMatch) return null;
+  const afterNoService = noServiceMatch.index + noServiceMatch[0].length;
+
+  // Temukan awal label "CLID LAMA:"
+  const clidLamaMatch = /\bCLID\s*LAMA\s*:/i.exec(text);
+  if (!clidLamaMatch) return null;
+  const beforeClidLama = clidLamaMatch.index;
+
+  if (afterNoService >= beforeClidLama) return null;
+
+  // Ambil semua teks di antara keduanya, buang baris kosong, trim
+  const block = text.slice(afterNoService, beforeClidLama)
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .join("\n");
+
+  return block || null;
+}
+
+function normalizeDomain(raw) {
+  if (!raw) return null;
+  const v = raw.trim();
+  return v.startsWith("@") ? v : `@${v}`;
+}
+
+function parseBinding(text) {
+  const { cleaned, inlineDomain } = stripInstructionalHeaders(text);
+
+  // Tangkap blok ekstra (apapun isinya) antara No Service dan CLID LAMA
+  const extraBlock = extractExtraBlock(cleaned);
+
+  const raw = extractFields(cleaned, BINDING_FIELDS);
+  if (!raw) return null;
+
+  // Jika baris eksplisit "Domain: @telkom.net" ada → pakai itu (sudah di raw.domain)
+  // Jika tidak ada → fallback ke domain yang ada di baris header deskriptif
+  if (!raw.domain && inlineDomain) {
+    raw.domain = inlineDomain;
+  }
+
+  // Pastikan domain diawali "@"
+  if (raw.domain) raw.domain = normalizeDomain(raw.domain);
+
+  // Trim nilai multiline (bersihkan newline berlebih di akhir tiap field)
+  for (const k of Object.keys(raw)) {
+    if (typeof raw[k] === "string") raw[k] = raw[k].trim().replace(/\n+$/, "") || null;
+  }
+
+  // Jika ada blok ekstra antara No Service dan CLID LAMA, append ke alasan_binding.
+  // Baris yang sudah ada di alasan_binding (case-insensitive, strip trailing ":") dilewati.
+  if (extraBlock) {
+    // Normalisasi untuk dedup: lowercase + hapus trailing ":" dan spasi
+    const normalize = (l) => l.trim().toLowerCase();
+
+    const existingNorms = raw.alasan_binding
+      ? raw.alasan_binding.split(/\r?\n/).map(normalize)
+      : [];
+
+    // Filter baris dari extraBlock:
+    // - Buang jika sudah ada persis di alasan_binding (case-insensitive)
+    // - Buang jika existing line adalah prefix dari baris ini
+    //   (misal "MIGRASI" sudah ada → "MIGRASI LAYANAN :" dibuang)
+    const newLines = extraBlock
+      .split(/\r?\n/)
+      .filter(l => {
+        const norm = normalize(l);
+        if (!norm) return false;
+        return !existingNorms.some(ex => norm === ex || norm.startsWith(ex));
+      });
+
+    if (newLines.length > 0) {
+      raw.alasan_binding = raw.alasan_binding
+        ? `${raw.alasan_binding}\n${newLines.join("\n")}`
+        : newLines.join("\n");
+    }
+  }
+
+  const rawNoTiket = raw.no_tiket;
+  delete raw.no_tiket;
+
+  const { jenis, nomor_tiket } = parseNoTiket(rawNoTiket);
+  raw.jenis = jenis;
+  raw.nomor_tiket = nomor_tiket;
+
+  const clidLamaInfo = parseClid(raw.clid_lama);
+  const clidBaruInfo = parseClid(raw.clid_baru);
+  raw.sto_lama = clidLamaInfo.sto || null;
+  raw.sto_baru = clidBaruInfo.sto || null;
+
+  const isValid =
+    Boolean(rawNoTiket) &&
+    Boolean(raw.no_service) &&
+    Boolean(raw.clid_lama) &&
+    Boolean(raw.clid_baru) &&
+    Boolean(raw.domain) &&
+    Boolean(raw.alasan_binding);
+
+  let invalidReason = null;
+  if (!isValid && !rawNoTiket) invalidReason = "missing_no_tiket";
+
+  return { data: raw, isValid, invalidReason };
+}
+
+function parseGno(text) {
+  const raw = extractFields(text, GNO_FIELDS);
+  if (!raw) return null;
+
+  const rawNoTiket = raw.no_tiket;
+  delete raw.no_tiket;
+
+  const { jenis, nomor_tiket } = parseNoTiket(rawNoTiket);
+  raw.jenis = jenis;
+  raw.nomor_tiket = nomor_tiket;
+
+  const isValid =
+    Boolean(raw.no_service) &&
+    Boolean(raw.keterangan);
+
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_keterangan")
+    : null;
+
+  return { data: raw, isValid, invalidReason };
+}
+
+function parseRouting(text) {
+  const raw = extractFields(text, ROUTING_FIELDS);
+  if (!raw) return null;
+
+  const rawNoTiket = raw.no_tiket;
+  delete raw.no_tiket;
+
+  const { jenis, nomor_tiket } = parseNoTiket(rawNoTiket);
+  raw.jenis = jenis;
+  raw.nomor_tiket = nomor_tiket;
+
+  const isValid =
+    Boolean(raw.no_service) &&
+    Boolean(raw.ket_gpon_msan);
+
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_ket_gpon_msan")
+    : null;
+
+  return { data: raw, isValid, invalidReason };
+}
+
+function parseOgnok(text) {
+  const raw = extractFields(text, OGNOK_FIELDS);
+  if (!raw) return null;
+
+  const rawNoTiket = raw.no_tiket;
+  delete raw.no_tiket;
+
+  const { jenis, nomor_tiket } = parseNoTiket(rawNoTiket);
+  raw.jenis = jenis;
+  raw.nomor_tiket = nomor_tiket;
+
+  const isValid =
+    Boolean(raw.no_service) &&
+    Boolean(raw.keterangan);
+
+  const invalidReason = !isValid
+    ? (!raw.no_service ? "missing_no_service" : "missing_keterangan")
+    : null;
+
+  return { data: raw, isValid, invalidReason };
+}
+
+// ─────────────────────────────────────────────
+// MAIN EXPORT
+// ─────────────────────────────────────────────
+
+/**
+ * Deteksi format & parse capture text secara otomatis.
+ *
+ * Return:
+ *   null  → teks tidak cocok format manapun
+ *   { formatType, data, isValid, invalidReason }
+ *
+ * formatType: "binding" | "gno" | "routing" | "ognok"
+ */
+export function parseCaptureText(rawText) {
+  const formatType = detectFormat(rawText);
+  if (!formatType) return null;
+
+  let result = null;
+
+  switch (formatType) {
+    case "binding": result = parseBinding(rawText); break;
+    case "gno":     result = parseGno(rawText);     break;
+    case "routing": result = parseRouting(rawText); break;
+    case "ognok":   result = parseOgnok(rawText);   break;
+  }
+
+  if (!result) return null;
+
+  return { formatType, ...result };
+}

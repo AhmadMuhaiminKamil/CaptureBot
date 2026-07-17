@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*.local
+node_modules/
+.vercel
+.DS_Store
+*.log
+api/tesseract.js-core/
+api/_core/
+api/_worker/
+api/lang-data/
