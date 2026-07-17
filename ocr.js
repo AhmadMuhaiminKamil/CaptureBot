@@ -113,19 +113,51 @@ async function preprocessImage(imageBytes) {
   return buffers;
 }
 
-// ── CORE PATH RESOLUTION ──────────────────────────
+// ── CORE PATH RESOLUTION (Vercel-safe) ──────────
 
-function getCorePath() {
-  const candidates = [
-    path.join(process.cwd(), "api", "tesseract.js-core"),
-    path.join(process.cwd(), "api", "_core"),
-    path.join(process.cwd(), "node_modules", "tesseract.js-core"),
-  ];
-  for (const p of candidates) {
-    const wasmFile = path.join(p, "tesseract-core-simd.wasm");
-    if (fs.existsSync(wasmFile)) return p;
+async function ensureCorePath() {
+  const destDir = '/tmp/tesseract-core';
+  if (fs.existsSync(path.join(destDir, 'tesseract-core-simd.wasm'))) {
+    return destDir;
   }
-  // fallback: let tesseract.js resolve itself
+
+  fs.mkdirSync(destDir, { recursive: true });
+
+  // Cari wasm dari berbagai lokasi, lalu copy ke /tmp/
+  const sources = [
+    path.join(process.cwd(), 'api', 'tesseract.js-core'),
+    path.join(process.cwd(), 'api', '_core'),
+    path.join(process.cwd(), 'node_modules', 'tesseract.js-core'),
+    path.join(process.cwd(), 'node_modules', 'tesseract.js', 'node_modules', 'tesseract.js-core'),
+  ];
+
+  for (const src of sources) {
+    if (!fs.existsSync(src)) continue;
+    const files = fs.readdirSync(src).filter(f => f.endsWith('.wasm') || f.endsWith('.wasm.js'));
+    for (const file of files) {
+      try { fs.copyFileSync(path.join(src, file), path.join(destDir, file)); } catch {}
+    }
+    const copied = fs.readdirSync(destDir).filter(f => f.includes('tesseract-core'));
+    if (copied.length > 0) {
+      console.log('[OCR] Core copied to /tmp:', copied.join(', '));
+      return destDir;
+    }
+  }
+
+  // Fallback terakhir: download dari CDN
+  console.warn('[OCR] Core wasm tidak ditemukan di source, download dari CDN...');
+  const url = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6/tesseract-core-simd.wasm';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(path.join(destDir, 'tesseract-core-simd.wasm'), buf);
+    console.log('[OCR] Download wasm OK');
+    return destDir;
+  } catch (err) {
+    console.error('[OCR] Download wasm gagal:', err.message);
+  }
+
   return undefined;
 }
 
@@ -157,7 +189,7 @@ export async function extractTextFromImage(imageBytes) {
   // Try zone-based OCR first
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
-    const corePath = getCorePath();
+    const corePath = await ensureCorePath();
     const worker = await createWorker("eng", 1, {
       logger: () => {},
       langPath,
@@ -181,7 +213,7 @@ export async function extractTextFromImage(imageBytes) {
 
   // Fallback: direct OCR on full image
   try {
-    const corePath = getCorePath();
+    const corePath = await ensureCorePath();
     const worker = await createWorker("eng", 1, {
       logger: () => {},
       langPath,
