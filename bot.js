@@ -123,8 +123,7 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
       FORMAT_TEMPLATE[parsed.formatType]
     );
   }
-  if (worklogAda === null) {
-    // Teks aja, gak ada foto buat OCR
+  if (worklogAda === null || parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'}). ${sender}`);
