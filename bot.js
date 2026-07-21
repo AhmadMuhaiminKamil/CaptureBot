@@ -419,47 +419,34 @@ bot.on(["text", "photo"], async (ctx) => {
   const repliedMsg = ctx.message.reply_to_message;
 
   // HANDLE: Reply foto → UPDATE existing record's photo_urls, NO FEEDBACK
-  if (repliedMsg && !hasCaption && !mediaGroupId) {
-    const replyKey = `${ctx.chat.id}_${ctx.from.id}_${repliedMsg.message_id}`;
-    const pending = formatPendingPhotos.get(replyKey);
-    if (pending) {
-      formatPendingPhotos.delete(replyKey);
-      const r = await doOCR(ctx, ctx.message.photo);
-      console.log(`[REPLY PHOTO] Foto reply ke format ${pending.formatType}, worklog=${r === true} — ${ctx.from.username || ctx.from.first_name}`);
-      if (supabase) {
-        // ponytail: retry 3x karena insert capture_ticket_messages mungkin belum selesai saat reply foto tiba
-        let tm = null;
-        for (let i = 0; i < 3 && !tm; i++) {
-          if (i > 0) await sleep(1500);
-          const { data } = await supabase
-            .from("capture_ticket_messages")
-            .select("ticket_id, format_type")
-            .eq("chat_id", ctx.chat.id)
-            .eq("message_id", repliedMsg.message_id)
-            .maybeSingle();
-          tm = data;
+  // ponytail: bypass in-memory formatPendingPhotos (unreliable on serverless) — query DB directly
+  if (repliedMsg && !hasCaption && !mediaGroupId && supabase) {
+    let tm = null;
+    for (let i = 0; i < 3 && !tm; i++) {
+      if (i > 0) await sleep(1500);
+      const { data } = await supabase
+        .from("capture_ticket_messages")
+        .select("ticket_id, format_type")
+        .eq("chat_id", ctx.chat.id)
+        .eq("message_id", repliedMsg.message_id)
+        .maybeSingle();
+      tm = data;
+    }
+    if (tm) {
+      const tableName = TABLE_FOR_FORMAT[tm.format_type];
+      const sender = ctx.from.username || ctx.from.first_name;
+      console.log(`[REPLY PHOTO] Foto reply ke format ${tm.format_type} — ${sender}`);
+      try {
+        const url = await uploadTelegramPhoto(ctx, ctx.message.photo);
+        const { data: existingRow } = await supabase
+          .from(tableName).select("photo_urls").eq("id", tm.ticket_id).maybeSingle();
+        if (existingRow) {
+          const newUrls = [...(Array.isArray(existingRow.photo_urls) ? existingRow.photo_urls : []), url];
+          await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
+          console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
         }
-        if (tm) {
-          const tableName = TABLE_FOR_FORMAT[tm.format_type];
-          try {
-            const url = await uploadTelegramPhoto(ctx, ctx.message.photo);
-            const { data: existingRow } = await supabase
-              .from(tableName)
-              .select("photo_urls")
-              .eq("id", tm.ticket_id)
-              .maybeSingle();
-            if (existingRow) {
-              const oldUrls = Array.isArray(existingRow.photo_urls) ? existingRow.photo_urls : [];
-              const newUrls = [...oldUrls, url];
-              await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
-              console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
-            }
-          } catch (err) {
-            console.error(`[REPLY PHOTO] Gagal upload/update foto:`, err);
-          }
-        } else {
-          console.log(`[REPLY PHOTO] No capture_ticket_messages entry for msg ${repliedMsg.message_id}, fallback skipped`);
-        }
+      } catch (err) {
+        console.error(`[REPLY PHOTO] Gagal upload/update foto:`, err);
       }
       return;
     }
