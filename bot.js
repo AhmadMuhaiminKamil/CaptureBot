@@ -482,6 +482,52 @@ bot.on(["text", "photo"], async (ctx) => {
   await handleSoloNoCaption(ctx);
 });
 
+// ── HANDLE: EDITED TEXT MESSAGE ───────────────
+// ponytail: only text edits; photo edits ignored (rare, complex)
+bot.on("edited_message", async (ctx) => {
+  const text = ctx.editedMessage?.text;
+  if (!text) return;
+  const msgId = ctx.editedMessage.message_id;
+  const parsed = parseCaptureText(text);
+  if (!parsed || !parsed.isValid) return; // silent if still invalid / unknown format
+  const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
+  const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+  const feedback = `✅ Format ${formatLabel} valid. ${sender}`;
+  // Try to edit existing bot reply for this message
+  if (supabase) {
+    const { data: tm } = await supabase
+      .from("capture_ticket_messages")
+      .select("ticket_id, format_type, message_id")
+      .eq("chat_id", ctx.chat.id)
+      .eq("message_id", msgId)
+      .maybeSingle();
+    if (tm) {
+      // Already processed (was valid before) — skip
+      return;
+    }
+    // Find bot reply linked to this user message via source lookup
+    const { data: rows } = await supabase
+      .from("capture_ticket_messages")
+      .select("message_id, ticket_id")
+      .eq("chat_id", ctx.chat.id)
+      .order("message_id", { ascending: false })
+      .limit(20);
+    // Bot reply = highest message_id row not from user (no direct way to tell, use editedMessage as anchor)
+    // Lazy: find nearest bot msg_id > msgId that's registered
+    const botRow = rows?.find(r => r.message_id > msgId);
+    if (botRow) {
+      await ctx.telegram.editMessageText(ctx.chat.id, botRow.message_id, null, feedback).catch(() => {});
+    } else {
+      await ctx.reply(feedback, { reply_parameters: { message_id: msgId } });
+    }
+    // Insert to DB
+    await processCaptureMessage(ctx, text, [], msgId, [msgId]).catch(e => console.error("DB err (edit):", e));
+  } else {
+    await ctx.reply(feedback, { reply_parameters: { message_id: msgId } });
+  }
+  console.log(`[EDIT] Format ${formatLabel} valid setelah edit — ${ctx.from.username || ctx.from.first_name}`);
+});
+
 // ── SUPABASE HELPERS ──────────────────────
 const STALE_BUFFER_MS = 2 * 60 * 1000;
 async function cleanupStaleBuffers() {
