@@ -80,11 +80,13 @@ export function validateWorklog(text) {
   const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}\b/g) || []).length;
   const hasCheckmarks = /✓|✔|√/.test(text);
   const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi|cek|sistem)\b/i.test(text);
-  const hasWaUi = /ketik\s*pesan|telepon\s*suara|voice\s*call|video\s*call/i.test(text);
-  // valid if: ≥2 timestamps + any signal, OR ≥1 timestamp + WA UI, OR ≥1 timestamp + checkmarks + chat words
+  const hasWaUi = /ketik\s*pesan|telepon\s*suara|voice\s*call|video\s*call|hari\s*ini|diedit|bahasa\s*indonesia/i.test(text);
+  // valid if: ≥2 timestamps + any signal, OR ≥1 timestamp + WA UI, OR ≥1 timestamp + checkmarks + chat words,
+  // OR WA UI + chat words (no reliable timestamp from OCR misread)
   if ((timestampMatches >= 2 && (hasCheckmarks || hasChatWords || hasWaUi)) ||
       (timestampMatches >= 1 && hasWaUi) ||
-      (timestampMatches >= 1 && hasCheckmarks && hasChatWords)) {
+      (timestampMatches >= 1 && hasCheckmarks && hasChatWords) ||
+      (hasWaUi && hasChatWords)) {
     found.push('chat~detected', 'chat~timestamps');
   }
 
@@ -95,6 +97,12 @@ export function validateWorklog(text) {
     found.push('timemark~detected', 'timemark~verified');
   }
 
+  // ponytail: if worklog keyword found + capture/binding context = it's a worklog screenshot
+  if (found.some(f => f === 'worklog' || f.startsWith('worklog~')) &&
+      /\b(capture|binding|format)\b/i.test(text)) {
+    if (!found.includes('context~capture')) found.push('context~capture');
+  }
+
   const valid = found.length >= MIN_KEYWORD_MATCH;
   return { valid, found, missing, rawText: text };
 }
@@ -102,10 +110,16 @@ export function validateWorklog(text) {
 // ── IMAGE PREPROCESSING (Sharp zones) ─────────────
 
 async function preprocessImage(imageBytes) {
-  const meta = await sharp(imageBytes).metadata();
+  // ponytail: resize to max 800px first — reduces zone crop size ~10x for hi-res photos
+  // ceiling: very low-res images may lose OCR quality; upgrade to dynamic sizing if needed
+  const MAX_DIM = 1200;
+  const resized = await sharp(imageBytes)
+    .resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true })
+    .toBuffer();
+
+  const meta = await sharp(resized).metadata();
   const w = meta.width;
   const h = meta.height;
-  const scale = 2; // ponytail: scale 4→2, ~4x faster; upgrade if accuracy drops
 
   const zones = [
     { left: 0, top: 0, width: w, height: Math.floor(h * 0.6) },                                       // atas (60%)
@@ -116,9 +130,8 @@ async function preprocessImage(imageBytes) {
 
   const buffers = [];
   for (const zone of zones) {
-    const buf = await sharp(imageBytes)
+    const buf = await sharp(resized)
       .extract(zone)
-      .resize(zone.width * scale, zone.height * scale)
       .sharpen()
       .sharpen()
       .grayscale()
