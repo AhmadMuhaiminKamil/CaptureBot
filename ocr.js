@@ -105,7 +105,7 @@ async function preprocessImage(imageBytes) {
   const meta = await sharp(imageBytes).metadata();
   const w = meta.width;
   const h = meta.height;
-  const scale = 4;
+  const scale = 2; // ponytail: scale 4→2, ~4x faster; upgrade if accuracy drops
 
   const zones = [
     { left: 0, top: 0, width: w, height: Math.floor(h * 0.6) },                                       // atas (60%)
