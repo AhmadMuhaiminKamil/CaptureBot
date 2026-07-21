@@ -84,12 +84,14 @@ function normalizeForEmptyCheck(value) {
 
 function stripInstructionalHeaders(text) {
   let inlineDomain = null;
+  let hasClidHeader = false;
 
   // Hanya hapus baris instruksional "CLID lama, CLID baru, Domain: ..."
   // BUKAN baris data seperti "CLID LAMA: GPON 1 - A - B - 1"
   const cleaned = text.replace(
     /^[ \t]*CLID\s*lama\s*[,，]\s*CLID\s*baru\b[^\n]*/im,
     (match) => {
+      hasClidHeader = true;
       // Extract domain inline dari baris ini sebagai fallback
       const domainMatch = match.match(/Domain\s*:\s*(.+)/i);
       if (domainMatch) {
@@ -100,7 +102,7 @@ function stripInstructionalHeaders(text) {
     }
   );
 
-  return { cleaned, inlineDomain };
+  return { cleaned, inlineDomain, hasClidHeader };
 }
 
 const CLID_FORMAT_REGEX = /^GPON\s*\d+\s*-\s*[A-Za-z0-9]+\s*-\s*([A-Za-z]+)\s*-\s*\d+/i;
@@ -215,7 +217,7 @@ function normalizeDomain(raw) {
 }
 
 function parseBinding(text) {
-  const { cleaned, inlineDomain } = stripInstructionalHeaders(text);
+  const { cleaned, inlineDomain, hasClidHeader } = stripInstructionalHeaders(text);
 
   // Tangkap blok ekstra (apapun isinya) antara No Service dan CLID LAMA
   const extraBlock = extractExtraBlock(cleaned);
@@ -281,6 +283,7 @@ function parseBinding(text) {
   const isValid =
     Boolean(rawNoTiket) &&
     Boolean(raw.no_service) &&
+    hasClidHeader &&
     Boolean(raw.clid_lama) &&
     Boolean(raw.clid_baru) &&
     Boolean(raw.domain) &&
