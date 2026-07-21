@@ -75,12 +75,16 @@ export function validateWorklog(text) {
     }
   }
 
-  // ponytail: chat screenshot detection — timestamps + checkmarks = evidence of chat activity = worklog ada
-  // ceiling: false positive if OCR picks up random time-like patterns; upgrade to ML if needed
+  // ponytail: chat screenshot detection — timestamps + chat signals = worklog ada
+  // ceiling: false positive on non-chat images with Indonesian words; ML upgrade if FP rate rises
   const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}\b/g) || []).length;
   const hasCheckmarks = /✓|✔|√/.test(text);
-  const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang)\b/i.test(text);
-  if (timestampMatches >= 2 && (hasCheckmarks || hasChatWords)) {
+  const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi|cek|sistem)\b/i.test(text);
+  const hasWaUi = /ketik\s*pesan|telepon\s*suara|voice\s*call|video\s*call/i.test(text);
+  // valid if: ≥2 timestamps + any signal, OR ≥1 timestamp + WA UI, OR ≥1 timestamp + checkmarks + chat words
+  if ((timestampMatches >= 2 && (hasCheckmarks || hasChatWords || hasWaUi)) ||
+      (timestampMatches >= 1 && hasWaUi) ||
+      (timestampMatches >= 1 && hasCheckmarks && hasChatWords)) {
     found.push('chat~detected', 'chat~timestamps');
   }
 
