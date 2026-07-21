@@ -422,8 +422,8 @@ bot.on(["text", "photo"], async (ctx) => {
   // ponytail: bypass in-memory formatPendingPhotos (unreliable on serverless) — query DB directly
   if (repliedMsg && !hasCaption && !mediaGroupId && supabase) {
     let tm = null;
-    for (let i = 0; i < 3 && !tm; i++) {
-      if (i > 0) await sleep(1500);
+    for (let i = 0; i < 10 && !tm; i++) {
+      if (i > 0) await sleep(2000);
       const { data } = await supabase
         .from("capture_ticket_messages")
         .select("ticket_id, format_type")
