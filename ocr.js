@@ -84,6 +84,12 @@ export function validateWorklog(text) {
     found.push('chat~detected', 'chat~timestamps');
   }
 
+  // ponytail: timemark watermark = field photo evidence = worklog ada
+  // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
+  if (/timemark|foto\s*\d*%?\s*akurat/i.test(text)) {
+    found.push('timemark~detected', 'timemark~verified');
+  }
+
   const valid = found.length >= MIN_KEYWORD_MATCH;
   return { valid, found, missing, rawText: text };
 }
