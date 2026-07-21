@@ -9,14 +9,12 @@
 const BINDING_FIELDS = [
   { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
   { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
-  { key: "clid_lama",       regex: /CLID\s*LAMA\s*:\s*/i,                                            singleLine: true },
-  { key: "clid_baru",       regex: /CLID\s*BARU\s*:\s*/i,                                            singleLine: true },
+  // ponytail: typo tolerance — LID LAMA, CLDI LAMA, CLIID LAMA, etc
+  { key: "clid_lama",       regex: /C?L[ID]{1,2}\s*LAMA\s*:\s*/i,                                    singleLine: true },
+  { key: "clid_baru",       regex: /C?L[ID]{1,2}\s*BARU\s*:\s*/i,                                    singleLine: true },
   { key: "domain",          regex: /Domain\s*:\s*/i,                                                  singleLine: true },
-  // Menerima: "Alasan Binding:", "Alasan:", "Keterangan:", "Ket.:", "Ket:"
-  // Anchor ke awal baris agar tidak salah match di tengah teks.
-  // Semua teks setelahnya (termasuk ODP lama/baru dll) masuk ke kolom ini.
-  // singleLine: false → boleh multiline (teks bebas panjang)
-  { key: "alasan_binding",  regex: /(?:^|\n)[ \t]*(?:Alasan\s*Binding|Alasan|Keterangan|Ket\.?)\s*:/im },
+  // ponytail: alasnan, alasna, alasna typo variants covered by \w* between letters
+  { key: "alasan_binding",  regex: /(?:^|\n)[ \t]*(?:Alas[a-z]*\s*Binding|Alas[a-z]*|Keterangan|Ket\.?)\s*:/im },
 ];
 
 const GNO_FIELDS = [
