@@ -502,7 +502,13 @@ bot.on("edited_message", async (ctx) => {
       .eq("message_id", msgId)
       .maybeSingle();
     if (tm) {
-      // Already processed (was valid before) — skip
+      // Sudah pernah valid — cek apakah alasan_binding berubah, update DB jika binding
+      if (tm.format_type === 'binding' && parsed.formatType === 'binding' && parsed.data?.alasan_binding) {
+        await supabase.from('binding_tickets')
+          .update({ alasan_binding: parsed.data.alasan_binding })
+          .eq('id', tm.ticket_id);
+        console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
+      }
       return;
     }
     // Find bot reply linked to this user message via source lookup
