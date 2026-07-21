@@ -108,11 +108,10 @@ async function preprocessImage(imageBytes) {
   const scale = 4;
 
   const zones = [
-    { left: 0, top: 0, width: w, height: Math.floor(h * 0.4) },                                                        // atas
-    { left: 0, top: 0, width: Math.floor(w * 0.5), height: h },                                                         // kiri
-    { left: 0, top: Math.floor(h * 0.1), width: Math.floor(w * 0.55), height: Math.floor(h * 0.5) },                   // tengah_kiri
-    { left: Math.floor(w * 0.4), top: Math.floor(h * 0.3), width: Math.floor(w * 0.6), height: Math.floor(h * 0.7) }, // kanan_bawah (WA embed)
-    { left: 0, top: Math.floor(h * 0.5), width: w, height: Math.floor(h * 0.5) },                                      // bawah
+    { left: 0, top: 0, width: w, height: Math.floor(h * 0.6) },                                       // atas (60%)
+    { left: 0, top: 0, width: Math.floor(w * 0.5), height: h },                                       // kiri full
+    { left: 0, top: Math.floor(h * 0.1), width: Math.floor(w * 0.55), height: Math.floor(h * 0.5) }, // tengah_kiri
+    { left: Math.floor(w * 0.45), top: Math.floor(h * 0.35), width: Math.floor(w * 0.55), height: Math.floor(h * 0.65) }, // kanan_bawah
   ];
 
   const buffers = [];
