@@ -437,13 +437,34 @@ bot.on(["text", "photo"], async (ctx) => {
       const sender = ctx.from.username || ctx.from.first_name;
       console.log(`[REPLY PHOTO] Foto reply ke format ${tm.format_type} — ${sender}`);
       try {
-        const url = await uploadTelegramPhoto(ctx, ctx.message.photo);
+        const [ocrValid, url] = await Promise.all([
+          tm.format_type === 'binding' ? doOCR(ctx, ctx.message.photo) : Promise.resolve(null),
+          uploadTelegramPhoto(ctx, ctx.message.photo),
+        ]);
         const { data: existingRow } = await supabase
           .from(tableName).select("photo_urls").eq("id", tm.ticket_id).maybeSingle();
         if (existingRow) {
           const newUrls = [...(Array.isArray(existingRow.photo_urls) ? existingRow.photo_urls : []), url];
           await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
           console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
+        }
+        // Edit bot feedback jika binding + worklog terdeteksi
+        if (tm.format_type === 'binding' && ocrValid === true) {
+          const { data: msgs } = await supabase
+            .from("capture_ticket_messages")
+            .select("message_id")
+            .eq("chat_id", ctx.chat.id)
+            .eq("ticket_id", tm.ticket_id)
+            .order("message_id", { ascending: false })
+            .limit(1);
+          const botMsgId = msgs?.[0]?.message_id;
+          if (botMsgId) {
+            const senderTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+            await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null,
+              `✅ Format Binding valid (worklog ada). ${senderTag}`
+            ).catch(() => {}); // silent if edit fails (too old, etc)
+            console.log(`[REPLY PHOTO] ✏️ Edited bot msg ${botMsgId} → worklog ada`);
+          }
         }
       } catch (err) {
         console.error(`[REPLY PHOTO] Gagal upload/update foto:`, err);
