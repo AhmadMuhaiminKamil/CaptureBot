@@ -427,12 +427,18 @@ bot.on(["text", "photo"], async (ctx) => {
       const r = await doOCR(ctx, ctx.message.photo);
       console.log(`[REPLY PHOTO] Foto reply ke format ${pending.formatType}, worklog=${r === true} — ${ctx.from.username || ctx.from.first_name}`);
       if (supabase) {
-        const { data: tm } = await supabase
-          .from("capture_ticket_messages")
-          .select("ticket_id, format_type")
-          .eq("chat_id", ctx.chat.id)
-          .eq("message_id", repliedMsg.message_id)
-          .maybeSingle();
+        // ponytail: retry 3x karena insert capture_ticket_messages mungkin belum selesai saat reply foto tiba
+        let tm = null;
+        for (let i = 0; i < 3 && !tm; i++) {
+          if (i > 0) await sleep(1500);
+          const { data } = await supabase
+            .from("capture_ticket_messages")
+            .select("ticket_id, format_type")
+            .eq("chat_id", ctx.chat.id)
+            .eq("message_id", repliedMsg.message_id)
+            .maybeSingle();
+          tm = data;
+        }
         if (tm) {
           const tableName = TABLE_FOR_FORMAT[tm.format_type];
           try {
