@@ -86,7 +86,8 @@ export function validateWorklog(text) {
 
   // ponytail: timemark watermark = field photo evidence = worklog ada
   // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
-  if (/timemark|foto\s*\d*%?\s*akurat/i.test(text)) {
+  if (/timemark|foto\s*\d*%?\s*akurat/i.test(text) ||
+      (/description/i.test(text) && /agentnote|attachment/i.test(text))) {
     found.push('timemark~detected', 'timemark~verified');
   }
 
