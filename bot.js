@@ -75,7 +75,7 @@ const COLUMNS_FOR_FORMAT = {
   binding: new Set([
     "telegram_user_id", "telegram_username", "telegram_chat_id",
     "raw_text", "photo_urls", "jenis", "nomor_tiket", "no_service",
-    "clid_lama", "clid_baru", "domain", "alasan_binding", "sto_lama", "sto_baru",
+    "clid_lama", "clid_baru", "domain", "alasan_binding", "sto_lama", "sto_baru", "worklog",
   ]),
   gno: new Set([
     "telegram_user_id", "telegram_username", "telegram_chat_id",
@@ -249,7 +249,7 @@ async function uploadTelegramPhoto(ctx, photoArray) {
 
 // ── PROSES CAPTURE ────────────────────────────
 
-async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, sourceMessageIds = []) {
+async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, sourceMessageIds = [], worklogAda = null) {
   if (!supabase) return;
   const senderName = ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ");
   const parsed = parseCaptureText(text);
@@ -282,6 +282,9 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
     rawRow.sto = sto || null;
     console.log(`[STO] no_service=${rawRow.no_service} → sto=${sto || '(not found)'}`);
   }
+
+  // Worklog status (binding only)
+  if (formatType === "binding") rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
 
   const row = filterColumnsForFormat(rawRow, formatType);
   const { data, error } = await supabase.from(tableName).insert(row).select().single();
@@ -339,7 +342,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
     if (parsed?.isValid && supabase) {
       const sourceIds = claimed.map(m => m.message_id);
       if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-      await processCaptureMessage(ctx, caption, photoGroups, anchorId, sourceIds).catch(e => console.error("DB err:", e));
+      await processCaptureMessage(ctx, caption, photoGroups, anchorId, sourceIds, worklogAda).catch(e => console.error("DB err:", e));
     }
     if (parsed) {
       registerPendingFormat(ctx, anchorId, {
@@ -360,7 +363,7 @@ async function handleSoloWithCaption(ctx) {
   if (parsed?.isValid && supabase) {
     const sourceIds = [ctx.message.message_id];
     if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-    await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds).catch(e => console.error("DB err:", e));
+    await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds, r === true).catch(e => console.error("DB err:", e));
   }
   if (parsed) {
     registerPendingFormat(ctx, ctx.message.message_id, {
@@ -448,8 +451,9 @@ bot.on(["text", "photo"], async (ctx) => {
           await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
           console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
         }
-        // Edit bot feedback jika binding + worklog terdeteksi
+        // Edit bot feedback + update DB worklog jika binding + worklog terdeteksi
         if (tm.format_type === 'binding' && ocrValid === true) {
+          await supabase.from('binding_tickets').update({ worklog: 'Ada' }).eq('id', tm.ticket_id);
           const { data: msgs } = await supabase
             .from("capture_ticket_messages")
             .select("message_id")
