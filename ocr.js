@@ -75,6 +75,15 @@ export function validateWorklog(text) {
     }
   }
 
+  // ponytail: chat screenshot detection — timestamps + checkmarks = evidence of chat activity = worklog ada
+  // ceiling: false positive if OCR picks up random time-like patterns; upgrade to ML if needed
+  const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}\b/g) || []).length;
+  const hasCheckmarks = /✓|✔|√/.test(text);
+  const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang)\b/i.test(text);
+  if (timestampMatches >= 2 && (hasCheckmarks || hasChatWords)) {
+    found.push('chat~detected', 'chat~timestamps');
+  }
+
   const valid = found.length >= MIN_KEYWORD_MATCH;
   return { valid, found, missing, rawText: text };
 }
