@@ -374,17 +374,49 @@ function parseOgnok(text) {
  *
  * formatType: "binding" | "gno" | "routing" | "ognok"
  */
+// ─────────────────────────────────────────────
+// TYPO NORMALIZER
+// ponytail: regex replacements for common 1-2 char typos on field labels.
+// ceiling: won't catch semantic errors or completely garbled words; upgrade to
+//          fuzzy match lib (fuse.js) if more exotic typos appear in production.
+// ─────────────────────────────────────────────
+function normalizeTypos(text) {
+  return text
+    // CLID LAMA/BARU — LID, CLDI, CLIID, CLID (any 1-2 char transposition)
+    .replace(/\bC?L[ID]{1,3}\s*LAMA\s*:/gi, 'CLID LAMA :')
+    .replace(/\bC?L[ID]{1,3}\s*BARU\s*:/gi, 'CLID BARU :')
+    // DOMAIN — dmain, doman, doamin, domian, dmoin
+    .replace(/\bD[OAIM]{1,4}N\s*:/gi, 'Domain :')
+    // NO TIKET — no tieket, no tikct, no tket, no tiiket, no tiket
+    .replace(/\bNo\.?\s*Ti[a-z]{2,6}\s*:/gi, 'No Tiket :')
+    // NO SERVICE — no servce, no servis, no srevice, no sevrice
+    .replace(/\bNo\.?\s*S[a-z]{4,9}\s*:/gi, (m) =>
+      /s.{0,2}r.{0,2}v/i.test(m) ? 'No Service :' : m
+    )
+    // ALASAN BINDING — alasnan bining, alsan binding, alasan bnding, alsaan binidng, asan binding, alasan bnding dll
+    .replace(/\bA[a-z]{2,8}\s*B?n?[ia]?[dn][a-z]*\s*:/gi, 'Alasan Binding :')
+    // ALASAN alone
+    .replace(/\bAlas[a-z]+\s*:/gi, (m) => /bin/i.test(m) ? m : 'Alasan :')
+    // KETERANGAN, PASSWORD — ketrangan, keteranagan, etc
+    .replace(/\bKet[a-z]*\s*[,&\/]\s*Pass[a-z]*\s*:/gi, 'Keterangan, Password :')
+    // KETERANGAN alone
+    .replace(/\bKet[a-z]{4,10}\s*:/gi, 'Keterangan :')
+    // KET. GPON/MSAN
+    .replace(/\bKet\.?\s*GPON[/\s]?(?:MSAN)?\s*:/gi, 'Ket. GPON/MSAN :');
+}
+
 export function parseCaptureText(rawText) {
-  const formatType = detectFormat(rawText);
+  const text = normalizeTypos(rawText);
+  const formatType = detectFormat(text);
   if (!formatType) return null;
 
   let result = null;
 
   switch (formatType) {
-    case "binding": result = parseBinding(rawText); break;
-    case "gno":     result = parseGno(rawText);     break;
-    case "routing": result = parseRouting(rawText); break;
-    case "ognok":   result = parseOgnok(rawText);   break;
+    case "binding": result = parseBinding(text); break;
+    case "gno":     result = parseGno(text);     break;
+    case "routing": result = parseRouting(text); break;
+    case "ognok":   result = parseOgnok(text);   break;
   }
 
   if (!result) return null;
