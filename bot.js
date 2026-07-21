@@ -259,14 +259,14 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
   if (!parsed.isValid) return;
   let photo_urls = [];
   if (Array.isArray(photoGroups) && photoGroups.length > 0) {
-    try {
-      for (const photoArray of photoGroups) {
+    for (const photoArray of photoGroups) {
+      try {
         const url = await uploadTelegramPhoto(ctx, photoArray);
         photo_urls.push(url);
+      } catch (err) {
+        console.error(`Gagal upload foto (${senderName}):`, err.message);
+        // ponytail: skip failed photo, still insert record with whatever uploaded
       }
-    } catch (err) {
-      console.error(`Gagal upload foto (${senderName}):`, err);
-      return;
     }
   }
   const rawRow = {
