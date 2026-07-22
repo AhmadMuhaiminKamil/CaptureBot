@@ -56,6 +56,8 @@ const FORMAT_SIGNATURES = [
   // ponytail: Keterangan: + gno/regfail keyword → detect as GNO (invalid), not OG NOK
   { formatType: "gno",      test: (t) => /Keterangan\s*:/i.test(t) && /\b(gno|regfail|pellpas)\b/i.test(t) },
   { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
+  // ponytail: Keterangan: + routing keyword → detect as Routing (invalid), not OG NOK
+  { formatType: "routing",  test: (t) => /Keterangan\s*:/i.test(t) && /\b(routing|reroute|gpon|msan)\b/i.test(t) },
   { formatType: "ognok",    regex: /Keterangan\s*:/i },
 ];
 
