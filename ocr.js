@@ -77,7 +77,7 @@ export function validateWorklog(text) {
 
   // ponytail: chat screenshot detection — timestamps + chat signals = worklog ada
   // ceiling: false positive on non-chat images with Indonesian words; ML upgrade if FP rate rises
-  const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}\b/g) || []).length;
+  const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}(?:\s*[AaPp][Mm])?\b/g) || []).length;
   const hasCheckmarks = /✓|✔|√/.test(text);
   const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi|cek|sistem)\b/i.test(text);
   const hasWaUi = /ketik\s*pesan|telepon\s*suara|voice\s*call|video\s*call|hari\s*ini|diedit|bahasa\s*indonesia/i.test(text);
