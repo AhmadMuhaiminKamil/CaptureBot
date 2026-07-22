@@ -18,12 +18,11 @@ const BINDING_FIELDS = [
 ];
 
 const GNO_FIELDS = [
+  { key: "capture",         regex: /Capture\s*:\s*/i,                                                 singleLine: true },
   { key: "no_tiket",        regex: /No\s*Tiket\s*:\s*/i,                                              singleLine: true },
   { key: "no_service",      regex: /No\s*Service\s*:\s*/i,                                            singleLine: true },
-  // Label "Keterangan, Password:" atau "Keterangan & Password:" atau "Keterangan/Password:"
-  // ponytail: fallback Keterangan: alone (user lupa ", Password") — detected as GNO via keyword check
+  // GNO wajib "Keterangan, Password:" — tanpa ", Password" bukan GNO
   { key: "keterangan",      regex: /Keterangan\s*[,&\/]\s*Password\s*:\s*/i },
-  { key: "keterangan",      regex: /Keterangan\s*:\s*/i },
 ];
 
 const ROUTING_FIELDS = [
@@ -54,8 +53,6 @@ const FORMAT_SIGNATURES = [
   // Didaftarkan sebelum gno/ognok agar tidak salah tangkap
   { formatType: "binding",  regex: /(?:^|\n)\s*Alasan\s*:/im },
   { formatType: "gno",      regex: /Keterangan\s*[,&\/]\s*Password\s*:/i },
-  // ponytail: Keterangan: alone but body mentions gno/password/regfail → GNO, not OG NOK
-  { formatType: "gno",      test: (t) => /Keterangan\s*:/i.test(t) && /\b(gno|pswd|password|regfail|pellpas)\b/i.test(t) },
   { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
   { formatType: "ognok",    regex: /Keterangan\s*:/i },
 ];
@@ -408,8 +405,8 @@ function normalizeTypos(text) {
     .replace(/\bKet[a-z]*\s*[,&\/]\s*Pass[a-z]*\s*:/gi, 'Keterangan, Password :')
     // KETERANGAN alone
     .replace(/\bKet[a-z]{4,10}\s*:/gi, 'Keterangan :')
-    // KET. GPON/MSAN
-    .replace(/\bKet\.?\s*GPON[/\s]?(?:MSAN)?\s*:/gi, 'Ket. GPON/MSAN :');
+    // KET. GPON/MSAN — ket gpon, keterangan gpon/msan, ket. gpon msan
+    .replace(/\bKet[a-z]*\.?\s*GPON[/\s]?(?:MSAN)?\s*:/gi, 'Ket. GPON/MSAN :');
 }
 
 export function parseCaptureText(rawText) {
