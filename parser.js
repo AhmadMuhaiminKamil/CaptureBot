@@ -53,6 +53,8 @@ const FORMAT_SIGNATURES = [
   // Didaftarkan sebelum gno/ognok agar tidak salah tangkap
   { formatType: "binding",  regex: /(?:^|\n)\s*Alasan\s*:/im },
   { formatType: "gno",      regex: /Keterangan\s*[,&\/]\s*Password\s*:/i },
+  // ponytail: Keterangan: + gno/regfail keyword → detect as GNO (invalid), not OG NOK
+  { formatType: "gno",      test: (t) => /Keterangan\s*:/i.test(t) && /\b(gno|regfail|pellpas)\b/i.test(t) },
   { formatType: "routing",  regex: /Ket\.?\s*GPON(?:\/MSAN)?\s*:/i },
   { formatType: "ognok",    regex: /Keterangan\s*:/i },
 ];
