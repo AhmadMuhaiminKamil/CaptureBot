@@ -211,9 +211,10 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     );
     console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak valid — ${ctx.from.username || ctx.from.first_name}`);
   } else {
-    // Teks aja — gak ada foto, jadi gak ada worklog status
+    // Teks aja — gak ada foto, worklog tidak ada untuk binding
+    const worklogPart = parsed.formatType === 'binding' ? ' (❌ worklog tidak ada)' : '';
     sentMsg = await replyTo(ctx, replyToMessageId,
-      `✅ Format ${formatLabel} valid. ${sender}`
+      `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`
     );
     console.log(`[FEEDBACK] ✅ Format ${formatLabel} valid — ${ctx.from.username || ctx.from.first_name}`);
   }
