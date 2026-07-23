@@ -149,6 +149,7 @@ async function doOCR(ctx, photoArray) {
     const ocrResult = await processPhotoOCR(ctx, photoArray);
     const valid = ocrResult.validation.valid;
     console.log(`[OCR] valid=${valid} found=${JSON.stringify(ocrResult.validation.found)} textLen=${ocrResult.rawText?.length||0}`);
+    if (!valid) console.log(`[OCR] rawText sample: ${ocrResult.rawText?.slice(0,300).replace(/\n/g,' ')}`);
     return valid;
   } catch (err) {
     console.error("[OCR] Error:", err);
