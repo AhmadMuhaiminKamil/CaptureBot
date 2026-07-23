@@ -495,9 +495,17 @@ bot.on("edited_message", async (ctx) => {
   if (!text) return;
   const msgId = ctx.editedMessage.message_id;
   const parsed = parseCaptureText(text);
-  if (!parsed || !parsed.isValid) return; // silent if still invalid / unknown format
+  if (!parsed) return; // unknown format → silent
   const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
+  if (!parsed.isValid) {
+    // Format dikenal tapi tidak valid setelah edit → kirim feedback invalid
+    await ctx.reply(
+      `❌ Format ${formatLabel} tidak valid. ${sender}\n\nFormat yang benar untuk ${formatLabel}:\n\n${FORMAT_TEMPLATE[parsed.formatType]}`,
+      { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+    ).catch(() => {});
+    return;
+  }
   const feedback = `✅ Format ${formatLabel} valid. ${sender}`;
   // Try to edit existing bot reply for this message
   if (supabase) {
