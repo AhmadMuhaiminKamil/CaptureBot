@@ -80,7 +80,7 @@ export function validateWorklog(text) {
   const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}(?:\s*[AaPp][Mm])?\b/g) || []).length;
   const hasCheckmarks = /✓|✔|√/.test(text);
   const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi|cek|sistem)\b/i.test(text);
-  const hasWaUi = /ketik\s*pesan|telepon\s*suara|voice\s*call|video\s*call|hari\s*ini|diedit|bahasa\s*indonesia/i.test(text);
+  const hasWaUi = /ketik\s*pesan|ke[it][ik]\s*p[ea]san|telepon\s*suara|voice\s*call|video\s*call|hari\s*ini|diedit|bahasa\s*indonesia/i.test(text);
   // valid if: ≥2 timestamps + any signal, OR ≥1 timestamp + WA UI, OR ≥1 timestamp + checkmarks + chat words,
   // OR WA UI + chat words (no reliable timestamp from OCR misread)
   if ((timestampMatches >= 2 && (hasCheckmarks || hasChatWords || hasWaUi)) ||
@@ -93,7 +93,8 @@ export function validateWorklog(text) {
   // ponytail: timemark watermark = field photo evidence = worklog ada
   // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
   if (/timemark|foto\s*\d*%?\s*akurat|akurat/i.test(text) ||
-      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text))) {
+      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text)) ||
+      /pengukuran|via\s*rest|vengu[xk]uran/i.test(text)) {
     found.push('timemark~detected', 'timemark~verified');
   }
 
