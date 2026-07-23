@@ -124,10 +124,11 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
       FORMAT_TEMPLATE[parsed.formatType]
     );
   }
-  if (worklogAda === null || parsed.formatType !== 'binding') {
+  if (parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
-  return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid (worklog ${worklogAda ? 'ada' : 'tidak ada'}). ${sender}`);
+  const worklogStr = worklogAda ? '✅ worklog ada' : '❌ worklog tidak ada';
+  return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr}. ${sender}`);
 }
 
 function filterColumnsForFormat(data, formatType) {
@@ -469,7 +470,7 @@ bot.on(["text", "photo"], async (ctx) => {
           if (botMsgId) {
             const senderTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
             await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null,
-              `✅ Format Binding valid (worklog ada). ${senderTag}`
+              `✅ Format Binding valid. ✅ worklog ada. ${senderTag}`
             ).catch(() => {}); // silent if edit fails (too old, etc)
             console.log(`[REPLY PHOTO] ✏️ Edited bot msg ${botMsgId} → worklog ada`);
           }
