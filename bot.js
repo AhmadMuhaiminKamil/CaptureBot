@@ -147,7 +147,9 @@ function registerPendingFormat(ctx, anchorMsgId, pendingData) {
 async function doOCR(ctx, photoArray) {
   try {
     const ocrResult = await processPhotoOCR(ctx, photoArray);
-    return ocrResult.validation.valid;
+    const valid = ocrResult.validation.valid;
+    console.log(`[OCR] valid=${valid} found=${JSON.stringify(ocrResult.validation.found)} textLen=${ocrResult.rawText?.length||0}`);
+    return valid;
   } catch (err) {
     console.error("[OCR] Error:", err);
     return null;
