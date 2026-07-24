@@ -580,6 +580,7 @@ bot.on("edited_message", async (ctx) => {
           .order('message_id', { ascending: false })
           .limit(1);
         const botMsgId = botMsgs?.[0]?.message_id;
+        console.log(`[EDIT-DEBUG] tm.ticket_id=${tm.ticket_id} botMsgId=${botMsgId} warn=${!!checkBindingSpecial(parsed.data?.alasan_binding)}`);
         if (warn) {
           const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
           if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, warnText).catch(() => {});
