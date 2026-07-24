@@ -535,14 +535,24 @@ bot.on("edited_message", async (ctx) => {
   const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
   if (!parsed.isValid) {
-    // Format dikenal tapi tidak valid setelah edit → kirim feedback invalid
     await ctx.reply(
       `❌ Format ${formatLabel} tidak valid. ${sender}\n\nFormat yang benar untuk ${formatLabel}:\n\n${FORMAT_TEMPLATE[parsed.formatType]}`,
       { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
     ).catch(() => {});
     return;
   }
-  const feedback = `✅ Format ${formatLabel} valid. ${sender}`;
+  // Check binding special rules (ONT/ODP) on edited message too
+  if (parsed.formatType === 'binding') {
+    const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+    if (warn) {
+      await ctx.reply(`${warn.replace('❌ ', `❌ ${sender} `)} `,
+        { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+      ).catch(() => {});
+      return;
+    }
+  }
+  const worklogPart = parsed.formatType === 'binding' ? ' (❌ worklog tidak ada)' : '';
+  const feedback = `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`;
   // Try to edit existing bot reply for this message
   if (supabase) {
     const { data: tm } = await supabase
