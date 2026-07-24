@@ -199,7 +199,7 @@ bot.command(["bantuan", "help"], (ctx) => {
 // ── BINDING SPECIAL VALIDATION ────────────────
 // ponytail: keyword check only; ceiling: exact phrasing variants not covered
 function checkBindingSpecial(a='') {
-  if (/ganti\s*ont|penggantian\s*ont|replace\s*ont/i.test(a)) {
+  if (/(?:ganti|pergantian|penggantian|replace|ubah)\s*ont\b/i.test(a)) {
     if (!(/\bSN\s*LAMA\b/i.test(a) && /\bSN\s*BARU\b/i.test(a)))
       return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:';
   }
