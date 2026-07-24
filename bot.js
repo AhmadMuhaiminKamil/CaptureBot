@@ -584,12 +584,16 @@ bot.on("edited_message", async (ctx) => {
     if (botRow) {
       await ctx.telegram.editMessageText(ctx.chat.id, botRow.message_id, null, feedback).catch(() => {});
     }
-    // Always send new reply so user sees the updated status
-    await ctx.reply(feedback, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
+    // ponytail: sendMessage direct, ctx.reply may silently fail on edited_message context
+    await ctx.telegram.sendMessage(ctx.chat.id, feedback,
+      { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+    ).catch(e => console.error('[EDIT] sendMessage failed:', e.message));
     // Insert to DB
     await processCaptureMessage(ctx, text, [], msgId, [msgId]).catch(e => console.error("DB err (edit):", e));
   } else {
-    await ctx.reply(feedback, { reply_parameters: { message_id: msgId } });
+    await ctx.telegram.sendMessage(ctx.chat.id, feedback,
+      { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+    ).catch(e => console.error('[EDIT] sendMessage failed:', e.message));
   }
   console.log(`[EDIT] Format ${formatLabel} valid setelah edit — ${ctx.from.username || ctx.from.first_name}`);
 });
