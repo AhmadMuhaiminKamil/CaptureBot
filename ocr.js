@@ -1,8 +1,7 @@
-// ocr.js
-// OCR module using tesseract.js + Sharp preprocessing
-// Includes: zone-based OCR, fuzzy WorkLog validation, and photo processing
+// ocr.js — OCR with PaddleOCR (ppu-paddle-ocr) + Tesseract fallback + Sharp preprocessing
 
-import { createWorker } from "tesseract.js";
+import { PaddleOcrService, DEFAULT_MODEL_URLS } from 'ppu-paddle-ocr';
+import { createWorker } from 'tesseract.js';
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
@@ -77,9 +76,9 @@ export function validateWorklog(text) {
 
   // ponytail: chat screenshot detection — timestamps + chat signals = worklog ada
   // ceiling: false positive on non-chat images with Indonesian words; ML upgrade if FP rate rises
-  const timestampMatches = (text.match(/\b\d{1,2}[.:]\d{2}(?:\s*[AaPp][Mm])?\b/g) || []).length;
+  const timestampMatches = (text.match(/\b([01]?\d|2[0-3])[.:][0-5]\d(?:\s*[AaPp][Mm])?\b/g) || []).length;
   const hasCheckmarks = /✓|✔|√/.test(text);
-  const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi|cek|sistem)\b/i.test(text);
+  const hasChatWords = /\b(pak|mas|iya|siap|baik|bisa|mba|bang|oke|engga|minta|tolong|lokasi)\b/i.test(text);
   const hasWaUi = /ketik\s*pesan|ke[it][ik]\s*p[ea]san|telepon\s*suara|voice\s*call|video\s*call|hari\s*ini|diedit|bahasa\s*indonesia/i.test(text);
   // valid if: ≥2 timestamps + any signal, OR ≥1 timestamp + WA UI, OR ≥1 timestamp + checkmarks + chat words,
   // OR WA UI + chat words (no reliable timestamp from OCR misread)
@@ -92,24 +91,33 @@ export function validateWorklog(text) {
 
   // ponytail: field photo detection — ODP code + date/GPS overlay = telcom field worklog
   // ceiling: false positive if non-field image has ODP text; upgrade if FP rate rises
-  // ponytail: ODP pattern — strict (ODP-BIN, ODP.CPE) + fuzzy for OCR noise (oDPF, OPP_BIN)
-  // ceiling: 'odp' as common word could FP if followed by uppercase; ML upgrade for better accuracy
-  const hasOdp = /\b[O0]DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]/i.test(text);
+  // ponytail: ODP typo coverage — OOP, OPP, etc from OCR misread; ceiling: FP if non-field text has "ODP"
+  const hasOdp = /\b[O0][O0P]?DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]|\bO[O0]P[-–./][A-Z]/i.test(text);
+  // ponytail: reject REST API diagnostic pages — EQN field contains ODP but it's not a field photo; INETNLOY only on REST pages
+  const isRestApiPage = /NASIPAddress|AcctStartTime|Cek\s*Kualitas|Pengukuran\s*Via\s*Rest|FramedIPAddress|AcctStop|Lost.Carrier|Session.Timeout|Terminate\s*Cause|Status\s*Koneksi|INETNLOY/i.test(text);
   const hasDateOverlay = (
-    /\d{4}[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}(?:\s*\(\w+\))?/.test(text) ||   // ISO + optional (Kam), allows spaces
+    /\d{4}[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}(?:\s*\(\w+\))?/.test(text) ||
     /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) ||
     /\d{1,2}:\d{2}\s*[|]\s*\d{1,2}\s+\w+\s+\d{4}/.test(text)
   );
-  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEW]|Kota\s+\w|Banten|Tangerang|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
-    || /[2e]camatan/i.test(text); // OCR drops K→2 or K entirely
+  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEWF]|Kota\s+\w|Bant[ea]|Tangeran|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
+    || /[2e]camatan/i.test(text);
   const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0][Mm]|FiComm|\bFTTH\b/i.test(text);
-  if (hasOdp || (hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
+  if (isRestApiPage) return { valid: false, found: [], missing: ['rest_api_page'], rawText: text };
+
+  if (hasOdp) {
+    found.push('odp~detected', 'odp~field');
+  } else if ((hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
+    found.push('odp~detected', 'odp~field');
+  }
+  // ponytail: 2+ distinct strong GPS keywords = field photo even without date/telkom
+  const strongGpsCount = (text.match(/\b(Kecamatan|Kelurahan|Kota\s+\w+|Daerah\s+Khusus|Ibukota)\b/gi) || []).length;
+  if (!found.includes('odp~detected') && strongGpsCount >= 2) {
     found.push('odp~detected', 'odp~field');
   }
   // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
   if (/timemark|foto\s*\d*%?\s*akurat|akurat/i.test(text) ||
-      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text)) ||
-      /pengukuran|via\s*rest|vengu[xk]uran/i.test(text)) {
+      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text))) {
     found.push('timemark~detected', 'timemark~verified');
   }
 
@@ -143,15 +151,18 @@ async function preprocessImage(imageBytes) {
     { left: 0, top: Math.floor(h * 0.1), width: Math.floor(w * 0.55), height: Math.floor(h * 0.5) }, // tengah_kiri
     { left: Math.floor(w * 0.45), top: Math.floor(h * 0.35), width: Math.floor(w * 0.55), height: Math.floor(h * 0.65) }, // kanan_bawah
     { left: 0, top: Math.floor(h * 0.7), width: w, height: Math.floor(h * 0.30) },                   // tengah_bawah full-width (Timemark/cuaca overlay)
-    { left: 0, top: Math.floor(h * 0.75), width: w, height: Math.floor(h * 0.25) },                  // strip_bawah (GPS/timestamp overlay)
+    { left: 0, top: Math.floor(h * 0.5), width: w, height: Math.floor(h * 0.50) },                   // timemark_bawah 50% — white text on dark Timemark overlay
+    { left: 0, top: Math.floor(h * 0.65), width: w, height: Math.floor(h * 0.35) },                  // strip_bawah 35% (GPS/timestamp overlay, pojok kanan bawah)
   ];
 
   const buffers = [];
   for (let i = 0; i < zones.length; i++) {
     const zone = zones[i];
-    const isBottomStrip = i === zones.length - 1;
+    const isTimemarkZone = i === zones.length - 2; // timemark_bawah — white text on dark
+    const isBottomStrip = i === zones.length - 1;  // strip_bawah — GPS overlay bottom-right
     let pipeline = sharp(resized).extract(zone);
     if (isBottomStrip) pipeline = pipeline.resize(zone.width * 2, zone.height * 2);
+    // ponytail: no negate — causes regression on normal-overlay photos
     const buf = await pipeline.sharpen().sharpen().grayscale().png().toBuffer();
     buffers.push(buf);
   }
@@ -225,55 +236,57 @@ function getLangPath() {
   return undefined; // let tesseract.js auto-download
 }
 
-// ── MAIN OCR FUNCTION ─────────────────────────────
+// ── MAIN OCR FUNCTION (PaddleOCR) ─────────────────
+
+let _paddleOcrSvc = null;
+async function getPaddleOcr() {
+  if (_paddleOcrSvc) return _paddleOcrSvc;
+  _paddleOcrSvc = new PaddleOcrService({
+    model: DEFAULT_MODEL_URLS,
+    processing: { engine: 'canvas-native' },
+    recognition: { strategy: 'per-line' },
+  });
+  await _paddleOcrSvc.initialize();
+  return _paddleOcrSvc;
+}
 
 export async function extractTextFromImage(imageBytes) {
-  const langPath = getLangPath();
-  console.log("[OCR] langPath:", langPath);
-
-  // Try zone-based OCR first
+  // ponytail: resize before PaddleOCR to limit ONNX inference time on Vercel
+  const MAX_DIM = 1200;
+  const resized = await sharp(imageBytes)
+    .resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  const ab = resized.buffer.slice(resized.byteOffset, resized.byteOffset + resized.byteLength);
+  try {
+    const svc = await getPaddleOcr();
+    const result = await svc.recognize(ab);
+    const text = result.text || '';
+    console.log('[OCR] PaddleOCR result length:', text.length);
+    if (text.length >= 30) return text;
+    // ponytail: fallback to Tesseract zone-crop when PaddleOCR yields too little text
+    // ceiling: adds ~3s per call; remove if PaddleOCR model improves on outdoor photos
+    console.log('[OCR] Short result, trying Tesseract fallback...');
+  } catch (err) {
+    console.error('[OCR] PaddleOCR failed:', err.message);
+  }
+  // Tesseract zone-crop fallback
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
     const corePath = await ensureCorePath();
-    const worker = await createWorker("eng", 1, {
-      logger: () => {},
-      langPath,
-      corePath,
-    });
-
-    let allText = "";
+    const worker = await createWorker('eng', 1, { logger: () => {}, corePath });
+    let allText = '';
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
-        allText += " " + text;
+        allText += ' ' + text;
       }
-    } finally {
-      await worker.terminate();
-    }
-    console.log("[OCR] Zone OCR result length:", allText.length);
+    } finally { await worker.terminate(); }
+    console.log('[OCR] Tesseract fallback result length:', allText.length);
     return allText.trim();
   } catch (err) {
-    console.warn("[OCR] Zone OCR failed, fallback direct:", err.message);
-  }
-
-  // Fallback: direct OCR on full image
-  try {
-    const corePath = await ensureCorePath();
-    const worker = await createWorker("eng", 1, {
-      logger: () => {},
-      langPath,
-      corePath,
-    });
-    try {
-      const { data: { text } } = await worker.recognize(imageBytes);
-      console.log("[OCR] Fallback direct OCR result length:", text.length);
-      return text.trim();
-    } finally {
-      await worker.terminate();
-    }
-  } catch (err) {
-    console.error("[OCR] All OCR attempts failed:", err);
-    throw err;
+    console.error('[OCR] Tesseract fallback failed:', err.message);
+    return '';
   }
 }
 
