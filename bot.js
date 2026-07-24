@@ -234,6 +234,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     // Teks aja — gak ada foto, worklog tidak ada untuk binding
     if (parsed.formatType === 'binding') {
       const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+      console.log(`[BINDING-SPECIAL] alasan="${parsed.data?.alasan_binding?.slice(0,80)}" warn=${!!warn}`);
       if (warn) {
         sentMsg = await replyTo(ctx, replyToMessageId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
         console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username || ctx.from.first_name}`);
