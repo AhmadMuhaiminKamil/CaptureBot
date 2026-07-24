@@ -129,7 +129,8 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   }
   const warn = checkBindingSpecial(parsed.data?.alasan_binding);
   if (warn) return await replyTo(ctx, anchorId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
-  const worklogStr = worklogAda ? '(✅ worklog ada)' : '(❌ worklog tidak ada)';
+  const evidenceLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
+  const worklogStr = worklogAda ? `(✅ ${evidenceLabel} ada)` : `(❌ ${evidenceLabel} tidak ada)`;
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr} ${sender}`);
 }
 
@@ -239,7 +240,8 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
         return sentMsg?.message_id || null;
       }
     }
-    const worklogPart = parsed.formatType === 'binding' ? ' (❌ worklog tidak ada)' : '';
+    const evLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
+    const worklogPart = parsed.formatType === 'binding' ? ` (❌ ${evLabel} tidak ada)` : '';
     sentMsg = await replyTo(ctx, replyToMessageId,
       `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`
     );
@@ -510,7 +512,7 @@ bot.on(["text", "photo"], async (ctx) => {
           if (botMsgId) {
             const senderTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
             await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null,
-              `✅ Format Binding valid. (✅ worklog ada) ${senderTag}`
+              `✅ Format Binding valid. (✅ ${/lapsung/i.test(tm.ticket_id) ? 'evidence' : 'worklog'} ada) ${senderTag}`
             ).catch(() => {}); // silent if edit fails (too old, etc)
             console.log(`[REPLY PHOTO] ✏️ Edited bot msg ${botMsgId} → worklog ada`);
           }
@@ -554,7 +556,8 @@ bot.on("edited_message", async (ctx) => {
       return;
     }
   }
-  const worklogPart = parsed.formatType === 'binding' ? ' (❌ worklog tidak ada)' : '';
+  const evLabel2 = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
+  const worklogPart = parsed.formatType === 'binding' ? ` (❌ ${evLabel2} tidak ada)` : '';
   const feedback = `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`;
   // Try to edit existing bot reply for this message
   if (supabase) {
