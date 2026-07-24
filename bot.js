@@ -293,6 +293,15 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
   if (formatType === "binding") rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
 
   const row = filterColumnsForFormat(rawRow, formatType);
+
+  // ponytail: delete duplicate nomor_tiket before insert — keeps newest, removes old
+  // ceiling: race condition if two identical tickets sent simultaneously; accept for now
+  if (rawRow.nomor_tiket) {
+    await supabase.from(tableName).delete()
+      .eq('telegram_chat_id', ctx.chat.id)
+      .eq('nomor_tiket', rawRow.nomor_tiket);
+  }
+
   const { data, error } = await supabase.from(tableName).insert(row).select().single();
   if (error) { console.error(`Supabase insert error (${senderName}):`, error); return; }
   console.log(`[DB] Insert ke ${tableName} ID=${data.id} (${senderName})`);
