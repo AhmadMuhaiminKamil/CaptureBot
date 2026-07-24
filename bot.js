@@ -462,6 +462,7 @@ async function handleTextOnly(ctx) {
 
 // ── MAIN HANDLER ───────────────────────────
 bot.on(["text", "photo"], async (ctx) => {
+  if (ctx.message.edit_date) return; // ponytail: edited messages handled by edited_message handler
   const isPhoto = Array.isArray(ctx.message.photo);
   if (!isPhoto) { await handleTextOnly(ctx); return; }
   const mediaGroupId = ctx.message.media_group_id;
