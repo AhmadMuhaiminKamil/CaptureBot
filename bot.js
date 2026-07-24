@@ -460,10 +460,15 @@ async function handleTextOnly(ctx) {
   }
 }
 
+// ponytail: set of msg_ids handled by edited_message this tick — prevents double-handling
+const _editedThisTick = new Set();
+
 // ── MAIN HANDLER ───────────────────────────
 bot.on(["text", "photo"], async (ctx) => {
-  if (ctx.message.edit_date) {
-    console.log(`[MAIN] Skipping edit_date message ${ctx.message.message_id}`);
+  const updateType = Object.keys(ctx.update).filter(k=>k!=='update_id')[0];
+  console.log(`[MAIN] handler fired: updateType=${updateType} edit_date=${ctx.message?.edit_date}`);
+  if (ctx.message?.edit_date) {
+    console.log(`[MAIN] Skipping edited message ${ctx.message.message_id}`);
     return;
   }
   const isPhoto = Array.isArray(ctx.message.photo);
@@ -539,6 +544,8 @@ bot.on("edited_message", async (ctx) => {
   const text = ctx.editedMessage?.text;
   if (!text) return;
   const msgId = ctx.editedMessage.message_id;
+  _editedThisTick.add(msgId);
+  setTimeout(() => _editedThisTick.delete(msgId), 5000); // ponytail: 5s window, serverless safe
   const parsed = parseCaptureText(text);
   if (!parsed) return; // unknown format → silent
   const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
