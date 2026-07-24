@@ -201,14 +201,14 @@ bot.command(["bantuan", "help"], (ctx) => {
 function checkBindingSpecial(a='') {
   if (/(?:ganti|pergantian|penggantian|replace|ubah)\s*ont\b/i.test(a)) {
     if (!(/\bSN\s*LAMA\b/i.test(a) && /\bSN\s*BARU\b/i.test(a)))
-      return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:';
+      return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
   if (/pindah\s*odp|pindah\s*port/i.test(a)) {
     // ponytail: also accept "dari ODP-xxx ke ODP-xxx" inline format
     const hasOdpPair = /\bODP\s*LAMA\b/i.test(a) ||
                        /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(a);
     if (!hasOdpPair)
-      return '❌ Mohon Sertakan:\nODP Lama:\nODP Baru:';
+      return '❌ Mohon Sertakan:\nODP Lama:\nODP Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
   return null;
 }
