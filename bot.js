@@ -128,7 +128,7 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
   const warn = checkBindingSpecial(parsed.data?.alasan_binding);
-  if (warn) return await replyTo(ctx, anchorId, `${warn} ${sender}`);
+  if (warn) return await replyTo(ctx, anchorId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
   const worklogStr = worklogAda ? '(✅ worklog ada)' : '(❌ worklog tidak ada)';
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr} ${sender}`);
 }
@@ -198,15 +198,17 @@ bot.command(["bantuan", "help"], (ctx) => {
 
 // ── BINDING SPECIAL VALIDATION ────────────────
 // ponytail: keyword check only; ceiling: exact phrasing variants not covered
-function checkBindingSpecial(alasanBinding) {
-  const a = alasanBinding || '';
+function checkBindingSpecial(a='') {
   if (/ganti\s*ont|penggantian\s*ont|replace\s*ont/i.test(a)) {
     if (!(/\bSN\s*LAMA\b/i.test(a) && /\bSN\s*BARU\b/i.test(a)))
-      return '❌ Mohon Sertakan:\nSN LAMA:\nSN BARU:';
+      return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:';
   }
   if (/pindah\s*odp|pindah\s*port/i.test(a)) {
-    if (!(/\bODP\s*LAMA\b|\bpindah\s*ODP\s*dari\b/i.test(a) && /\bODP\s*BARU\b|\bke\s+ODP\b|\bke\s+[A-Z]{2,}-/i.test(a)))
-      return '❌ Mohon Sertakan:\nODP Lama dan ODP Baru';
+    // ponytail: also accept "dari ODP-xxx ke ODP-xxx" inline format
+    const hasOdpPair = /\bODP\s*LAMA\b/i.test(a) ||
+                       /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(a);
+    if (!hasOdpPair)
+      return '❌ Mohon Sertakan:\nODP Lama:\nODP Baru:';
   }
   return null;
 }
@@ -232,7 +234,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     if (parsed.formatType === 'binding') {
       const warn = checkBindingSpecial(parsed.data?.alasan_binding);
       if (warn) {
-        sentMsg = await replyTo(ctx, replyToMessageId, `${warn} ${sender}`);
+        sentMsg = await replyTo(ctx, replyToMessageId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
         console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username || ctx.from.first_name}`);
         return sentMsg?.message_id || null;
       }
