@@ -583,9 +583,9 @@ bot.on("edited_message", async (ctx) => {
     const botRow = rows?.find(r => r.message_id > msgId);
     if (botRow) {
       await ctx.telegram.editMessageText(ctx.chat.id, botRow.message_id, null, feedback).catch(() => {});
-    } else {
-      await ctx.reply(feedback, { reply_parameters: { message_id: msgId } });
     }
+    // Always send new reply so user sees the updated status
+    await ctx.reply(feedback, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
     // Insert to DB
     await processCaptureMessage(ctx, text, [], msgId, [msgId]).catch(e => console.error("DB err (edit):", e));
   } else {
