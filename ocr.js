@@ -96,13 +96,13 @@ export function validateWorklog(text) {
   // ceiling: 'odp' as common word could FP if followed by uppercase; ML upgrade for better accuracy
   const hasOdp = /\b[O0]DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]/i.test(text);
   const hasDateOverlay = (
-    /\d{4}[-./]\d{2}[-./]\d{2}(?:\s*\(\w+\))?/.test(text) ||          // ISO + optional (Kam)
-    /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) || // full/short month + year
-    /\d{1,2}:\d{2}\s*[|]\s*\d{1,2}\s+\w+\s+\d{4}/.test(text)         // Timemark: 16:54 | 17 Jul 2026
+    /\d{4}[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}(?:\s*\(\w+\))?/.test(text) ||   // ISO + optional (Kam), allows spaces
+    /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) ||
+    /\d{1,2}:\d{2}\s*[|]\s*\d{1,2}\s+\w+\s+\d{4}/.test(text)
   );
   const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEW]|Kota\s+\w|Banten|Tangerang|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
-    || /ecamatan/i.test(text); // OCR often drops K from Kecamatan
-  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiHome|FiComm|\bFTTH\b/i.test(text);
+    || /[2e]camatan/i.test(text); // OCR drops K→2 or K entirely
+  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0][Mm]|FiComm|\bFTTH\b/i.test(text);
   if (hasOdp || (hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
     found.push('odp~detected', 'odp~field');
   }
