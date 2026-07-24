@@ -234,11 +234,53 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     // Teks aja — gak ada foto, worklog tidak ada untuk binding
     if (parsed.formatType === 'binding') {
       const warn = checkBindingSpecial(parsed.data?.alasan_binding);
-      console.log(`[BINDING-SPECIAL] alasan="${parsed.data?.alasan_binding?.slice(0,80)}" warn=${!!warn}`);
       if (warn) {
-        sentMsg = await replyTo(ctx, replyToMessageId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
-        console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username || ctx.from.first_name}`);
+        const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
+        // ponytail: check if a warn msg already exists for this nomor_tiket in this chat
+        let existingWarnMsgId = null;
+        if (supabase && parsed.data?.nomor_tiket) {
+          const { data: prev } = await supabase
+            .from('capture_ticket_messages')
+            .select('message_id')
+            .eq('chat_id', ctx.chat.id)
+            .eq('ticket_id', `warn:${parsed.data.nomor_tiket}`)
+            .maybeSingle();
+          existingWarnMsgId = prev?.message_id;
+        }
+        if (existingWarnMsgId) {
+          await ctx.telegram.editMessageText(ctx.chat.id, existingWarnMsgId, null, warnText).catch(() => {});
+          console.log(`[FEEDBACK] ❌ Binding special (edited) — ${ctx.from.username}`);
+          return existingWarnMsgId;
+        }
+        sentMsg = await replyTo(ctx, replyToMessageId, warnText);
+        // store warn msg_id so next forward can edit it
+        if (supabase && parsed.data?.nomor_tiket && sentMsg?.message_id) {
+          await supabase.from('capture_ticket_messages').upsert({
+            chat_id: ctx.chat.id, message_id: sentMsg.message_id,
+            ticket_id: `warn:${parsed.data.nomor_tiket}`, format_type: 'binding',
+          }, { onConflict: 'chat_id,message_id' }).catch(() => {});
+        }
+        console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username}`);
         return sentMsg?.message_id || null;
+      }
+      // special passed — if there was a warn msg, edit it to valid
+      if (supabase && parsed.data?.nomor_tiket) {
+        const { data: prev } = await supabase
+          .from('capture_ticket_messages')
+          .select('message_id')
+          .eq('chat_id', ctx.chat.id)
+          .eq('ticket_id', `warn:${parsed.data.nomor_tiket}`)
+          .maybeSingle();
+        if (prev?.message_id) {
+          const evLabel2 = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
+          const validText = `✅ Format ${formatLabel} valid. (❌ ${evLabel2} tidak ada) ${sender}`;
+          await ctx.telegram.editMessageText(ctx.chat.id, prev.message_id, null, validText).catch(() => {});
+          // delete warn entry
+          await supabase.from('capture_ticket_messages').delete()
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', `warn:${parsed.data.nomor_tiket}`).catch(() => {});
+          console.log(`[FEEDBACK] ✅ Binding valid (edited warn) — ${ctx.from.username}`);
+          return prev.message_id;
+        }
       }
     }
     const evLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
@@ -461,17 +503,9 @@ async function handleTextOnly(ctx) {
   }
 }
 
-// ponytail: set of msg_ids handled by edited_message this tick — prevents double-handling
-const _editedThisTick = new Set();
-
 // ── MAIN HANDLER ───────────────────────────
 bot.on(["text", "photo"], async (ctx) => {
-  const updateType = Object.keys(ctx.update).filter(k=>k!=='update_id')[0];
-  console.log(`[MAIN] handler fired: updateType=${updateType} edit_date=${ctx.message?.edit_date}`);
-  if (ctx.message?.edit_date) {
-    console.log(`[MAIN] Skipping edited message ${ctx.message.message_id}`);
-    return;
-  }
+  if (ctx.message?.edit_date) return; // ponytail: edited messages go to edited_message handler
   const isPhoto = Array.isArray(ctx.message.photo);
   if (!isPhoto) { await handleTextOnly(ctx); return; }
   const mediaGroupId = ctx.message.media_group_id;
@@ -545,8 +579,7 @@ bot.on("edited_message", async (ctx) => {
   const text = ctx.editedMessage?.text;
   if (!text) return;
   const msgId = ctx.editedMessage.message_id;
-  _editedThisTick.add(msgId);
-  setTimeout(() => _editedThisTick.delete(msgId), 5000); // ponytail: 5s window, serverless safe
+  
   const parsed = parseCaptureText(text);
   if (!parsed) return; // unknown format → silent
   const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
@@ -592,7 +625,6 @@ bot.on("edited_message", async (ctx) => {
           .order('message_id', { ascending: false })
           .limit(1);
         const botMsgId = botMsgs?.[0]?.message_id;
-        console.log(`[EDIT-DEBUG] tm.ticket_id=${tm.ticket_id} botMsgId=${botMsgId} warn=${!!checkBindingSpecial(parsed.data?.alasan_binding)}`);
         if (warn) {
           const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
           if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, warnText).catch(() => {});
