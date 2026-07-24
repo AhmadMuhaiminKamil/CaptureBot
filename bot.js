@@ -127,6 +127,27 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
+  // ponytail: special binding validations based on alasan keyword
+  // ceiling: keyword matching only, not semantic — upgrade if more variants appear
+  const alasan = (parsed.data?.alasan_binding || '').toLowerCase();
+  if (/ganti\s*ont|penggantian\s*ont|replace\s*ont/i.test(alasan)) {
+    const hasSn = /\bSN\s*LAMA\b/i.test(parsed.data?.alasan_binding || '') &&
+                  /\bSN\s*BARU\b/i.test(parsed.data?.alasan_binding || '');
+    if (!hasSn) {
+      return await replyTo(ctx, anchorId,
+        `❌ Mohon Sertakan:\nSN LAMA:\nSN BARU: ${sender}`
+      );
+    }
+  }
+  if (/pindah\s*odp|pindah\s*port/i.test(alasan)) {
+    const hasOdp = /\bODP\s*LAMA\b|\bpindah\s*ODP\s*dari\b/i.test(parsed.data?.alasan_binding || '') &&
+                   /\bODP\s*BARU\b|\bke\s+ODP\b|\bke\s+[A-Z]{2,}-/i.test(parsed.data?.alasan_binding || '');
+    if (!hasOdp) {
+      return await replyTo(ctx, anchorId,
+        `❌ Mohon Sertakan:\nODP Lama dan ODP Baru ${sender}`
+      );
+    }
+  }
   const worklogStr = worklogAda ? '(✅ worklog ada)' : '(❌ worklog tidak ada)';
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr} ${sender}`);
 }
