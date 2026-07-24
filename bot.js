@@ -317,7 +317,10 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
   }
 
   // Worklog status (binding only)
-  if (formatType === "binding") rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
+  if (formatType === "binding") {
+    if (checkBindingSpecial(rawRow.alasan_binding)) return; // ponytail: skip insert if special check fails
+    rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
+  }
 
   const row = filterColumnsForFormat(rawRow, formatType);
 
@@ -565,22 +568,28 @@ bot.on("edited_message", async (ctx) => {
       // Re-check special binding rules on edit
       if (parsed.formatType === 'binding') {
         const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+        // Find the bot reply for this ticket to edit it
+        const { data: botMsgs } = await supabase
+          .from('capture_ticket_messages')
+          .select('message_id')
+          .eq('chat_id', ctx.chat.id)
+          .eq('ticket_id', tm.ticket_id)
+          .order('message_id', { ascending: false })
+          .limit(1);
+        const botMsgId = botMsgs?.[0]?.message_id;
         if (warn) {
-          await ctx.telegram.sendMessage(ctx.chat.id, `${warn.replace('❌ ', `❌ ${sender} `)} `,
-            { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
-          ).catch(() => {});
+          const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
+          if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, warnText).catch(() => {});
+          else await ctx.telegram.sendMessage(ctx.chat.id, warnText, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
           return;
         }
-        // Update alasan_binding + send valid feedback
+        // Special check passed — update DB + edit bot reply to valid
         if (parsed.data?.alasan_binding) {
-          await supabase.from('binding_tickets')
-            .update({ alasan_binding: parsed.data.alasan_binding })
-            .eq('id', tm.ticket_id);
+          await supabase.from('binding_tickets').update({ alasan_binding: parsed.data.alasan_binding }).eq('id', tm.ticket_id);
           console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
         }
-        await ctx.telegram.sendMessage(ctx.chat.id, feedback,
-          { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
-        ).catch(() => {});
+        if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, feedback).catch(() => {});
+        else await ctx.telegram.sendMessage(ctx.chat.id, feedback, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
         return;
       }
       return;
