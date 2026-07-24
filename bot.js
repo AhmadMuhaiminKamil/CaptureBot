@@ -127,27 +127,8 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
-  // ponytail: special binding validations based on alasan keyword
-  // ceiling: keyword matching only, not semantic — upgrade if more variants appear
-  const alasan = (parsed.data?.alasan_binding || '').toLowerCase();
-  if (/ganti\s*ont|penggantian\s*ont|replace\s*ont/i.test(alasan)) {
-    const hasSn = /\bSN\s*LAMA\b/i.test(parsed.data?.alasan_binding || '') &&
-                  /\bSN\s*BARU\b/i.test(parsed.data?.alasan_binding || '');
-    if (!hasSn) {
-      return await replyTo(ctx, anchorId,
-        `❌ Mohon Sertakan:\nSN LAMA:\nSN BARU: ${sender}`
-      );
-    }
-  }
-  if (/pindah\s*odp|pindah\s*port/i.test(alasan)) {
-    const hasOdp = /\bODP\s*LAMA\b|\bpindah\s*ODP\s*dari\b/i.test(parsed.data?.alasan_binding || '') &&
-                   /\bODP\s*BARU\b|\bke\s+ODP\b|\bke\s+[A-Z]{2,}-/i.test(parsed.data?.alasan_binding || '');
-    if (!hasOdp) {
-      return await replyTo(ctx, anchorId,
-        `❌ Mohon Sertakan:\nODP Lama dan ODP Baru ${sender}`
-      );
-    }
-  }
+  const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+  if (warn) return await replyTo(ctx, anchorId, `${warn} ${sender}`);
   const worklogStr = worklogAda ? '(✅ worklog ada)' : '(❌ worklog tidak ada)';
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr} ${sender}`);
 }
@@ -215,6 +196,21 @@ bot.command(["bantuan", "help"], (ctx) => {
   );
 });
 
+// ── BINDING SPECIAL VALIDATION ────────────────
+// ponytail: keyword check only; ceiling: exact phrasing variants not covered
+function checkBindingSpecial(alasanBinding) {
+  const a = alasanBinding || '';
+  if (/ganti\s*ont|penggantian\s*ont|replace\s*ont/i.test(a)) {
+    if (!(/\bSN\s*LAMA\b/i.test(a) && /\bSN\s*BARU\b/i.test(a)))
+      return '❌ Mohon Sertakan:\nSN LAMA:\nSN BARU:';
+  }
+  if (/pindah\s*odp|pindah\s*port/i.test(a)) {
+    if (!(/\bODP\s*LAMA\b|\bpindah\s*ODP\s*dari\b/i.test(a) && /\bODP\s*BARU\b|\bke\s+ODP\b|\bke\s+[A-Z]{2,}-/i.test(a)))
+      return '❌ Mohon Sertakan:\nODP Lama dan ODP Baru';
+  }
+  return null;
+}
+
 // ── FORMAT VALIDATION FEEDBACK (text-only) ────
 async function handleFormatValidation(ctx, text, replyToMessageId) {
   const parsed = parseCaptureText(text);
@@ -233,6 +229,14 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     console.log(`[FEEDBACK] ❌ Format ${formatLabel} tidak valid — ${ctx.from.username || ctx.from.first_name}`);
   } else {
     // Teks aja — gak ada foto, worklog tidak ada untuk binding
+    if (parsed.formatType === 'binding') {
+      const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+      if (warn) {
+        sentMsg = await replyTo(ctx, replyToMessageId, `${warn} ${sender}`);
+        console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username || ctx.from.first_name}`);
+        return sentMsg?.message_id || null;
+      }
+    }
     const worklogPart = parsed.formatType === 'binding' ? ' (❌ worklog tidak ada)' : '';
     sentMsg = await replyTo(ctx, replyToMessageId,
       `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`
