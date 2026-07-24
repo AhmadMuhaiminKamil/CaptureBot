@@ -562,12 +562,26 @@ bot.on("edited_message", async (ctx) => {
       .eq("message_id", msgId)
       .maybeSingle();
     if (tm) {
-      // Sudah pernah valid — cek apakah alasan_binding berubah, update DB jika binding
-      if (tm.format_type === 'binding' && parsed.formatType === 'binding' && parsed.data?.alasan_binding) {
-        await supabase.from('binding_tickets')
-          .update({ alasan_binding: parsed.data.alasan_binding })
-          .eq('id', tm.ticket_id);
-        console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
+      // Re-check special binding rules on edit
+      if (parsed.formatType === 'binding') {
+        const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+        if (warn) {
+          await ctx.telegram.sendMessage(ctx.chat.id, `${warn.replace('❌ ', `❌ ${sender} `)} `,
+            { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+          ).catch(() => {});
+          return;
+        }
+        // Update alasan_binding + send valid feedback
+        if (parsed.data?.alasan_binding) {
+          await supabase.from('binding_tickets')
+            .update({ alasan_binding: parsed.data.alasan_binding })
+            .eq('id', tm.ticket_id);
+          console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
+        }
+        await ctx.telegram.sendMessage(ctx.chat.id, feedback,
+          { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
+        ).catch(() => {});
+        return;
       }
       return;
     }
