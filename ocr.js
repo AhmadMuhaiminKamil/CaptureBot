@@ -90,7 +90,15 @@ export function validateWorklog(text) {
     found.push('chat~detected', 'chat~timestamps');
   }
 
-  // ponytail: timemark watermark = field photo evidence = worklog ada
+  // ponytail: field photo detection — ODP code + date/GPS overlay = telcom field worklog
+  // ceiling: false positive if non-field image has ODP text; upgrade if FP rate rises
+  const hasOdp = /\b[O0]DP[-–./][A-Z]|OBPTEE|ODPIREF|ODP[_\s][A-Z]/i.test(text);
+  const hasDateOverlay = /\d{4}[-./]\d{2}[-./]\d{2}|[0-9]{1,2}\s*(?:Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des|Aug|Oct)\s*\d{4}/i.test(text);
+  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Kecamatan|ecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|Kota\s+\w|Banten|Tangerang|Bogor|Bekasi|Depok)\b/i.test(text);
+  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiHome|FHTT|FTTH|FiComm/i.test(text);
+  if (hasOdp || (hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
+    found.push('odp~detected', 'odp~field');
+  }
   // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
   if (/timemark|foto\s*\d*%?\s*akurat|akurat/i.test(text) ||
       (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text)) ||
@@ -127,17 +135,16 @@ async function preprocessImage(imageBytes) {
     { left: 0, top: 0, width: Math.floor(w * 0.5), height: h },                                       // kiri full
     { left: 0, top: Math.floor(h * 0.1), width: Math.floor(w * 0.55), height: Math.floor(h * 0.5) }, // tengah_kiri
     { left: Math.floor(w * 0.45), top: Math.floor(h * 0.35), width: Math.floor(w * 0.55), height: Math.floor(h * 0.65) }, // kanan_bawah
+    { left: 0, top: Math.floor(h * 0.75), width: w, height: Math.floor(h * 0.25) },                  // strip_bawah (GPS/timestamp overlay)
   ];
 
   const buffers = [];
-  for (const zone of zones) {
-    const buf = await sharp(resized)
-      .extract(zone)
-      .sharpen()
-      .sharpen()
-      .grayscale()
-      .png()
-      .toBuffer();
+  for (let i = 0; i < zones.length; i++) {
+    const zone = zones[i];
+    const isBottomStrip = i === zones.length - 1; // strip_bawah gets 2x upscale for small GPS text
+    let pipeline = sharp(resized).extract(zone);
+    if (isBottomStrip) pipeline = pipeline.resize(zone.width * 2, zone.height * 2);
+    const buf = await pipeline.sharpen().sharpen().grayscale().png().toBuffer();
     buffers.push(buf);
   }
   return buffers;
