@@ -92,10 +92,17 @@ export function validateWorklog(text) {
 
   // ponytail: field photo detection — ODP code + date/GPS overlay = telcom field worklog
   // ceiling: false positive if non-field image has ODP text; upgrade if FP rate rises
-  const hasOdp = /\b[O0]DP[-–./][A-Z]|OBPTEE|ODPIREF|ODP[_\s][A-Z]/i.test(text);
-  const hasDateOverlay = /\d{4}[-./]\d{2}[-./]\d{2}|[0-9]{1,2}\s*(?:Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des|Aug|Oct)\s*\d{4}/i.test(text);
-  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Kecamatan|ecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|Kota\s+\w|Banten|Tangerang|Bogor|Bekasi|Depok)\b/i.test(text);
-  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiHome|FHTT|FTTH|FiComm/i.test(text);
+  // ponytail: ODP pattern — strict (ODP-BIN, ODP.CPE) + fuzzy for OCR noise (oDPF, OPP_BIN)
+  // ceiling: 'odp' as common word could FP if followed by uppercase; ML upgrade for better accuracy
+  const hasOdp = /\b[O0]DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]/i.test(text);
+  const hasDateOverlay = (
+    /\d{4}[-./]\d{2}[-./]\d{2}(?:\s*\(\w+\))?/.test(text) ||          // ISO + optional (Kam)
+    /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) || // full/short month + year
+    /\d{1,2}:\d{2}\s*[|]\s*\d{1,2}\s+\w+\s+\d{4}/.test(text)         // Timemark: 16:54 | 17 Jul 2026
+  );
+  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEW]|Kota\s+\w|Banten|Tangerang|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
+    || /ecamatan/i.test(text); // OCR often drops K from Kecamatan
+  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiHome|FiComm|\bFTTH\b/i.test(text);
   if (hasOdp || (hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
     found.push('odp~detected', 'odp~field');
   }
@@ -135,13 +142,14 @@ async function preprocessImage(imageBytes) {
     { left: 0, top: 0, width: Math.floor(w * 0.5), height: h },                                       // kiri full
     { left: 0, top: Math.floor(h * 0.1), width: Math.floor(w * 0.55), height: Math.floor(h * 0.5) }, // tengah_kiri
     { left: Math.floor(w * 0.45), top: Math.floor(h * 0.35), width: Math.floor(w * 0.55), height: Math.floor(h * 0.65) }, // kanan_bawah
+    { left: 0, top: Math.floor(h * 0.7), width: w, height: Math.floor(h * 0.30) },                   // tengah_bawah full-width (Timemark/cuaca overlay)
     { left: 0, top: Math.floor(h * 0.75), width: w, height: Math.floor(h * 0.25) },                  // strip_bawah (GPS/timestamp overlay)
   ];
 
   const buffers = [];
   for (let i = 0; i < zones.length; i++) {
     const zone = zones[i];
-    const isBottomStrip = i === zones.length - 1; // strip_bawah gets 2x upscale for small GPS text
+    const isBottomStrip = i === zones.length - 1;
     let pipeline = sharp(resized).extract(zone);
     if (isBottomStrip) pipeline = pipeline.resize(zone.width * 2, zone.height * 2);
     const buf = await pipeline.sharpen().sharpen().grayscale().png().toBuffer();
