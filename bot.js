@@ -243,17 +243,6 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
       const warn = checkBindingSpecial(parsed.data?.alasan_binding);
       if (warn) {
         const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
-        // ponytail: if ticket already valid in DB, skip warn (re-forward after edit)
-        if (supabase && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
-          const key = parsed.data.nomor_tiket || parsed.data.no_service;
-          const col = parsed.data.nomor_tiket ? 'nomor_tiket' : 'no_service';
-          const { data: alreadyValid } = await supabase.from('binding_tickets')
-            .select('id').eq('telegram_chat_id', ctx.chat.id).eq(col, key).limit(1);
-          if (alreadyValid?.length) {
-            console.log(`[WARN] skip — ticket already valid`);
-            return null;
-          }
-        }
         // ponytail: check if a warn msg already exists for this nomor_tiket in this chat
         let existingWarnMsgId = null;
         if (supabase && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
@@ -307,17 +296,6 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
     }
     const evLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
     const worklogPart = parsed.formatType === 'binding' ? ` (❌ ${evLabel} tidak ada)` : '';
-    // ponytail: skip if ticket already processed (re-forward after edit)
-    if (supabase && parsed.formatType === 'binding' && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
-      const key = parsed.data.nomor_tiket || parsed.data.no_service;
-      const col = parsed.data.nomor_tiket ? 'nomor_tiket' : 'no_service';
-      const { data: existing } = await supabase.from('binding_tickets')
-        .select('id').eq('telegram_chat_id', ctx.chat.id).eq(col, key).limit(1);
-      if (existing?.length) {
-        console.log(`[FEEDBACK] skip duplicate binding ${key}`);
-        return null;
-      }
-    }
     sentMsg = await replyTo(ctx, replyToMessageId,
       `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`
     );
