@@ -629,11 +629,15 @@ bot.on("edited_message", async (ctx) => {
   if (supabase) {
     // First: check if there's a warn msg for this nomor_tiket (user fixed special check via edit)
     if (parsed.formatType === 'binding' && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
+      const wKey = parsed.data?.nomor_tiket || parsed.data?.no_service;
+      const wUid = warnUuid(ctx.chat.id, wKey);
+      console.log(`[WARN-LOOKUP] chat=${ctx.chat.id} key=${wKey} uuid=${wUid}`);
       const { data: warnEntry } = await supabase
         .from('capture_ticket_messages').select('message_id')
         .eq('chat_id', ctx.chat.id)
-        .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
+        .eq('ticket_id', wUid)
         .maybeSingle();
+      console.log(`[WARN-LOOKUP] result=${warnEntry?.message_id ?? 'null'}`);
       if (warnEntry?.message_id) {
         const warn = checkBindingSpecial(parsed.data?.alasan_binding);
         if (warn) {
