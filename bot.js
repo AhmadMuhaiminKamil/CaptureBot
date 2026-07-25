@@ -617,14 +617,23 @@ bot.on("edited_message", async (ctx) => {
       if (parsed.formatType === 'binding') {
         const warn = checkBindingSpecial(parsed.data?.alasan_binding);
         // Find the bot reply for this ticket to edit it
-        const { data: botMsgs } = await supabase
-          .from('capture_ticket_messages')
-          .select('message_id')
-          .eq('chat_id', ctx.chat.id)
-          .eq('ticket_id', tm.ticket_id)
-          .order('message_id', { ascending: false })
-          .limit(1);
-        const botMsgId = botMsgs?.[0]?.message_id;
+        // Check if there's a warn msg tracked for this nomor_tiket
+        let botMsgId = null;
+        if (parsed.data?.nomor_tiket) {
+          const { data: warnRow } = await supabase
+            .from('capture_ticket_messages').select('message_id')
+            .eq('chat_id', ctx.chat.id)
+            .eq('ticket_id', `warn:${parsed.data.nomor_tiket}`)
+            .maybeSingle();
+          botMsgId = warnRow?.message_id || null;
+        }
+        if (!botMsgId) {
+          const { data: botMsgs } = await supabase
+            .from('capture_ticket_messages').select('message_id')
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', tm.ticket_id)
+            .order('message_id', { ascending: false }).limit(1);
+          botMsgId = botMsgs?.[0]?.message_id || null;
+        }
         if (warn) {
           const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
           if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, warnText).catch(() => {});
@@ -635,6 +644,11 @@ bot.on("edited_message", async (ctx) => {
         if (parsed.data?.alasan_binding) {
           await supabase.from('binding_tickets').update({ alasan_binding: parsed.data.alasan_binding }).eq('id', tm.ticket_id);
           console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
+        }
+        // clean up warn entry if any
+        if (parsed.data?.nomor_tiket) {
+          await supabase.from('capture_ticket_messages').delete()
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', `warn:${parsed.data.nomor_tiket}`);
         }
         if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, feedback).catch(() => {});
         else await ctx.telegram.sendMessage(ctx.chat.id, feedback, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
