@@ -250,7 +250,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
             .from('capture_ticket_messages')
             .select('message_id')
             .eq('chat_id', ctx.chat.id)
-            .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket))
+            .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
             .maybeSingle();
           existingWarnMsgId = prev?.message_id;
         }
@@ -260,12 +260,15 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
           return existingWarnMsgId;
         }
         sentMsg = await replyTo(ctx, replyToMessageId, warnText);
-        // store warn msg_id so next forward can edit it
-        if (supabase && parsed.data?.nomor_tiket && sentMsg?.message_id) {
-          await supabase.from('capture_ticket_messages').upsert({
+        // ponytail: use nomor_tiket or no_service as unique key for warn tracking
+        const warnKey = parsed.data?.nomor_tiket || parsed.data?.no_service;
+        if (supabase && warnKey && sentMsg?.message_id) {
+          const {error: upsertErr} = await supabase.from('capture_ticket_messages').upsert({
             chat_id: ctx.chat.id, message_id: sentMsg.message_id,
-            ticket_id: warnUuid(ctx.chat.id, parsed.data.nomor_tiket), format_type: 'binding',
+            ticket_id: warnUuid(ctx.chat.id, warnKey), format_type: 'binding',
           }, { onConflict: 'chat_id,message_id' });
+          if (upsertErr) console.error('[WARN] upsert error:', upsertErr.message);
+          else console.log(`[WARN] stored warn msgId=${sentMsg.message_id} key=${warnKey}`);
         }
         console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username}`);
         return sentMsg?.message_id || null;
@@ -276,7 +279,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
           .from('capture_ticket_messages')
           .select('message_id')
           .eq('chat_id', ctx.chat.id)
-          .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket))
+          .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
           .maybeSingle();
         if (prev?.message_id) {
           const evLabel2 = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
@@ -284,7 +287,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
           await ctx.telegram.editMessageText(ctx.chat.id, prev.message_id, null, validText).catch(() => {});
           // delete warn entry
           await supabase.from('capture_ticket_messages').delete()
-            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket));
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service));
           console.log(`[FEEDBACK] ✅ Binding valid (edited warn) — ${ctx.from.username}`);
           return prev.message_id;
         }
@@ -618,7 +621,7 @@ bot.on("edited_message", async (ctx) => {
       const { data: warnEntry } = await supabase
         .from('capture_ticket_messages').select('message_id')
         .eq('chat_id', ctx.chat.id)
-        .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket))
+        .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
         .maybeSingle();
       if (warnEntry?.message_id) {
         const warn = checkBindingSpecial(parsed.data?.alasan_binding);
@@ -628,7 +631,7 @@ bot.on("edited_message", async (ctx) => {
         } else {
           await ctx.telegram.editMessageText(ctx.chat.id, warnEntry.message_id, null, feedback).catch(() => {});
           await supabase.from('capture_ticket_messages').delete()
-            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket));
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service));
           await processCaptureMessage(ctx, text, [], msgId, [msgId]).catch(e => console.error('DB err (edit):', e));
           console.log(`[EDIT] Format ${formatLabel} valid setelah edit (warn resolved) — ${ctx.from.username || ctx.from.first_name}`);
         }
@@ -653,7 +656,7 @@ bot.on("edited_message", async (ctx) => {
           const { data: warnRow } = await supabase
             .from('capture_ticket_messages').select('message_id')
             .eq('chat_id', ctx.chat.id)
-            .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket))
+            .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
             .maybeSingle();
           botMsgId = warnRow?.message_id || null;
         }
@@ -678,7 +681,7 @@ bot.on("edited_message", async (ctx) => {
         // clean up warn entry if any
         if (parsed.data?.nomor_tiket) {
           await supabase.from('capture_ticket_messages').delete()
-            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data.nomor_tiket));
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service));
         }
         if (botMsgId) await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null, feedback).catch(() => {});
         else await ctx.telegram.sendMessage(ctx.chat.id, feedback, { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }).catch(() => {});
