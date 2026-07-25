@@ -606,6 +606,29 @@ bot.on("edited_message", async (ctx) => {
   const feedback = `✅ Format ${formatLabel} valid.${worklogPart} ${sender}`;
   // Try to edit existing bot reply for this message
   if (supabase) {
+    // First: check if there's a warn msg for this nomor_tiket (user fixed special check via edit)
+    if (parsed.formatType === 'binding' && parsed.data?.nomor_tiket) {
+      const { data: warnEntry } = await supabase
+        .from('capture_ticket_messages').select('message_id')
+        .eq('chat_id', ctx.chat.id)
+        .eq('ticket_id', `warn:${parsed.data.nomor_tiket}`)
+        .maybeSingle();
+      if (warnEntry?.message_id) {
+        const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+        if (warn) {
+          await ctx.telegram.editMessageText(ctx.chat.id, warnEntry.message_id, null,
+            `${warn.replace('❌ ', `❌ ${sender} `)} `).catch(() => {});
+        } else {
+          await ctx.telegram.editMessageText(ctx.chat.id, warnEntry.message_id, null, feedback).catch(() => {});
+          await supabase.from('capture_ticket_messages').delete()
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', `warn:${parsed.data.nomor_tiket}`);
+          await processCaptureMessage(ctx, text, [], msgId, [msgId]).catch(e => console.error('DB err (edit):', e));
+          console.log(`[EDIT] Format ${formatLabel} valid setelah edit (warn resolved) — ${ctx.from.username || ctx.from.first_name}`);
+        }
+        return;
+      }
+    }
+
     const { data: tm } = await supabase
       .from("capture_ticket_messages")
       .select("ticket_id, format_type, message_id")
