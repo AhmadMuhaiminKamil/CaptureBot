@@ -251,8 +251,8 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
             .select('message_id')
             .eq('chat_id', ctx.chat.id)
             .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
-            .maybeSingle();
-          existingWarnMsgId = prev?.message_id;
+            .order('message_id', { ascending: false }).limit(1);
+          existingWarnMsgId = prev?.[0]?.message_id || null;
         }
         if (existingWarnMsgId) {
           await ctx.telegram.editMessageText(ctx.chat.id, existingWarnMsgId, null, warnText).catch(() => {});
@@ -275,12 +275,13 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
       }
       // special passed — if there was a warn msg, edit it to valid
       if (supabase && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
-        const { data: prev } = await supabase
+        const { data: prevRows } = await supabase
           .from('capture_ticket_messages')
           .select('message_id')
           .eq('chat_id', ctx.chat.id)
           .eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service))
-          .maybeSingle();
+          .order('message_id', { ascending: false }).limit(1);
+        const prev = prevRows?.[0] || null;
         if (prev?.message_id) {
           const evLabel2 = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
           const validText = `✅ Format ${formatLabel} valid. (❌ ${evLabel2} tidak ada) ${sender}`;
@@ -631,13 +632,14 @@ bot.on("edited_message", async (ctx) => {
     if (parsed.formatType === 'binding' && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
       const wKey = parsed.data?.nomor_tiket || parsed.data?.no_service;
       const wUid = warnUuid(ctx.chat.id, wKey);
-      console.log(`[WARN-LOOKUP] chat=${ctx.chat.id} key=${wKey} uuid=${wUid}`);
-      const { data: warnEntry } = await supabase
+      const { data: warnRows } = await supabase
         .from('capture_ticket_messages').select('message_id')
         .eq('chat_id', ctx.chat.id)
         .eq('ticket_id', wUid)
-        .maybeSingle();
-      console.log(`[WARN-LOOKUP] result=${warnEntry?.message_id ?? 'null'}`);
+        .order('message_id', { ascending: false })
+        .limit(1);
+      const warnEntry = warnRows?.[0] || null;
+      console.log(`[WARN-LOOKUP] key=${wKey} rows=${warnRows?.length??0} msgId=${warnEntry?.message_id??'null'}`);
       if (warnEntry?.message_id) {
         const warn = checkBindingSpecial(parsed.data?.alasan_binding);
         if (warn) {
