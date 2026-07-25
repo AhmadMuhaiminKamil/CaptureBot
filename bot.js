@@ -245,7 +245,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
         const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
         // ponytail: check if a warn msg already exists for this nomor_tiket in this chat
         let existingWarnMsgId = null;
-        if (supabase && parsed.data?.nomor_tiket) {
+        if (supabase && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
           const { data: prev } = await supabase
             .from('capture_ticket_messages')
             .select('message_id')
@@ -274,7 +274,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
         return sentMsg?.message_id || null;
       }
       // special passed — if there was a warn msg, edit it to valid
-      if (supabase && parsed.data?.nomor_tiket) {
+      if (supabase && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
         const { data: prev } = await supabase
           .from('capture_ticket_messages')
           .select('message_id')
@@ -628,7 +628,7 @@ bot.on("edited_message", async (ctx) => {
   // Try to edit existing bot reply for this message
   if (supabase) {
     // First: check if there's a warn msg for this nomor_tiket (user fixed special check via edit)
-    if (parsed.formatType === 'binding' && parsed.data?.nomor_tiket) {
+    if (parsed.formatType === 'binding' && (parsed.data?.nomor_tiket || parsed.data?.no_service)) {
       const { data: warnEntry } = await supabase
         .from('capture_ticket_messages').select('message_id')
         .eq('chat_id', ctx.chat.id)
@@ -663,7 +663,7 @@ bot.on("edited_message", async (ctx) => {
         // Find the bot reply for this ticket to edit it
         // Check if there's a warn msg tracked for this nomor_tiket
         let botMsgId = null;
-        if (parsed.data?.nomor_tiket) {
+        if ((parsed.data?.nomor_tiket || parsed.data?.no_service)) {
           const { data: warnRow } = await supabase
             .from('capture_ticket_messages').select('message_id')
             .eq('chat_id', ctx.chat.id)
@@ -690,7 +690,7 @@ bot.on("edited_message", async (ctx) => {
           console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
         }
         // clean up warn entry if any
-        if (parsed.data?.nomor_tiket) {
+        if ((parsed.data?.nomor_tiket || parsed.data?.no_service)) {
           await supabase.from('capture_ticket_messages').delete()
             .eq('chat_id', ctx.chat.id).eq('ticket_id', warnUuid(ctx.chat.id, parsed.data?.nomor_tiket || parsed.data?.no_service));
         }
