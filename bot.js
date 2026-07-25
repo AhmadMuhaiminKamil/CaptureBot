@@ -258,7 +258,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
           await supabase.from('capture_ticket_messages').upsert({
             chat_id: ctx.chat.id, message_id: sentMsg.message_id,
             ticket_id: `warn:${parsed.data.nomor_tiket}`, format_type: 'binding',
-          }, { onConflict: 'chat_id,message_id' }).catch(() => {});
+          }, { onConflict: 'chat_id,message_id' });
         }
         console.log(`[FEEDBACK] ❌ Binding special check gagal — ${ctx.from.username}`);
         return sentMsg?.message_id || null;
@@ -277,7 +277,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
           await ctx.telegram.editMessageText(ctx.chat.id, prev.message_id, null, validText).catch(() => {});
           // delete warn entry
           await supabase.from('capture_ticket_messages').delete()
-            .eq('chat_id', ctx.chat.id).eq('ticket_id', `warn:${parsed.data.nomor_tiket}`).catch(() => {});
+            .eq('chat_id', ctx.chat.id).eq('ticket_id', `warn:${parsed.data.nomor_tiket}`);
           console.log(`[FEEDBACK] ✅ Binding valid (edited warn) — ${ctx.from.username}`);
           return prev.message_id;
         }
