@@ -128,7 +128,7 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
-  const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+  const warn = checkBindingSpecial(parsed.data?.alasan_binding, parsed.data?.raw_text || '');
   if (warn) return await replyTo(ctx, anchorId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
   const evidenceLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
   const worklogStr = worklogAda ? `(✅ ${evidenceLabel} ada)` : `(❌ ${evidenceLabel} tidak ada)`;
@@ -206,15 +206,16 @@ function warnUuid(chatId, nomorTiket) {
 
 // ── BINDING SPECIAL VALIDATION ────────────────
 // ponytail: keyword check only; ceiling: exact phrasing variants not covered
-function checkBindingSpecial(a='') {
-  if (/(?:ganti|pergantian|penggantian|replace|ubah)\s*ont\b/i.test(a)) {
-    if (!(/\bSN\s*LAMA\b/i.test(a) && /\bSN\s*BARU\b/i.test(a)))
+// ponytail: scans full alasan text; upgrade to full raw_text if users put ODP outside alasan
+function checkBindingSpecial(a='', rawText='') {
+  const full = (a + '\n' + rawText).toLowerCase(); // combine alasan + raw for flexibility
+  if (/(?:ganti|pergantian|penggantian|replace|ubah)\s*ont\b/i.test(full)) {
+    if (!(/\bSN\s*LAMA\b/i.test(full) && /\bSN\s*BARU\b/i.test(full)))
       return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
-  if (/pindah\s*odp|pindah\s*port/i.test(a)) {
-    // ponytail: also accept "dari ODP-xxx ke ODP-xxx" inline format
-    const hasOdpPair = /\bODP\s*LAMA\b/i.test(a) ||
-                       /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(a);
+  if (/pindah\s*odp|pindah\s*port/i.test(full)) {
+    const hasOdpPair = /\bODP\s*LAMA\b/i.test(full) ||
+                       /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(full);
     if (!hasOdpPair)
       return '❌ Mohon Sertakan:\nODP Lama:\nODP Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
@@ -240,7 +241,7 @@ async function handleFormatValidation(ctx, text, replyToMessageId) {
   } else {
     // Teks aja — gak ada foto, worklog tidak ada untuk binding
     if (parsed.formatType === 'binding') {
-      const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+      const warn = checkBindingSpecial(parsed.data?.alasan_binding, text || '');
       if (warn) {
         const warnText = `${warn.replace('❌ ', `❌ ${sender} `)} `;
         // ponytail: check if a warn msg already exists for this nomor_tiket in this chat
@@ -374,7 +375,7 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
 
   // Worklog status (binding only)
   if (formatType === "binding") {
-    if (checkBindingSpecial(rawRow.alasan_binding)) return; // ponytail: skip insert if special check fails
+    if (checkBindingSpecial(rawRow.alasan_binding, rawRow.raw_text || '')) return; // ponytail: skip insert if special check fails
     rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
   }
 
@@ -619,7 +620,7 @@ bot.on("edited_message", async (ctx) => {
   }
   // Check binding special rules (ONT/ODP) on edited message too
   if (parsed.formatType === 'binding') {
-    const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+    const warn = checkBindingSpecial(parsed.data?.alasan_binding, text || '');
     if (warn) {
       await ctx.reply(`${warn.replace('❌ ', `❌ ${sender} `)} `,
         { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
@@ -645,7 +646,7 @@ bot.on("edited_message", async (ctx) => {
       const warnEntry = warnRows?.[0] || null;
       console.log(`[WARN-LOOKUP] key=${wKey} rows=${warnRows?.length??0} msgId=${warnEntry?.message_id??'null'}`);
       if (warnEntry?.message_id) {
-        const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+        const warn = checkBindingSpecial(parsed.data?.alasan_binding, text || '');
         if (warn) {
           await ctx.telegram.editMessageText(ctx.chat.id, warnEntry.message_id, null,
             `${warn.replace('❌ ', `❌ ${sender} `)} `).catch(() => {});
@@ -669,7 +670,7 @@ bot.on("edited_message", async (ctx) => {
     if (tm) {
       // Re-check special binding rules on edit
       if (parsed.formatType === 'binding') {
-        const warn = checkBindingSpecial(parsed.data?.alasan_binding);
+        const warn = checkBindingSpecial(parsed.data?.alasan_binding, text || '');
         // Find the bot reply for this ticket to edit it
         // Check if there's a warn msg tracked for this nomor_tiket
         let botMsgId = null;
