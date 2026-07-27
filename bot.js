@@ -114,7 +114,7 @@ function replyTo(ctx, replyToMessageId, text, extra = {}) {
   return ctx.reply(text, { ...replyExtra, ...extra });
 }
 
-async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
+async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda, rawText='') {
   if (!parsed) return null; // Format tidak dikenal — silent, no feedback
   const formatLabel = LABEL_FOR_FORMAT[parsed.formatType] || parsed.formatType;
   const sender = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name || '';
@@ -128,7 +128,7 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda) {
   if (parsed.formatType !== 'binding') {
     return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${sender}`);
   }
-  const warn = checkBindingSpecial(parsed.data?.alasan_binding, parsed.data?.raw_text || '');
+  const warn = checkBindingSpecial(parsed.data?.alasan_binding, rawText);
   if (warn) return await replyTo(ctx, anchorId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
   const evidenceLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
   const worklogStr = worklogAda ? `(✅ ${evidenceLabel} ada)` : `(❌ ${evidenceLabel} tidak ada)`;
@@ -453,7 +453,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
   const worklogAda = hasAnyValid(ocrResults);
   if (caption) {
     const parsed = parseCaptureText(caption);
-    const sent = await replyFormatFeedback(ctx, anchorId, parsed, worklogAda);
+    const sent = await replyFormatFeedback(ctx, anchorId, parsed, worklogAda, caption || '');
     const botReplyMsgId = sent?.message_id || null;
     console.log(`[FEEDBACK] ${parsed?.isValid ? '✅' : '❌'} Format ${parsed?.formatType || 'unknown'} (album) — ${ctx.from.username || ctx.from.first_name}`);
     if (parsed?.isValid && supabase) {
@@ -474,7 +474,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
 async function handleSoloWithCaption(ctx) {
   const r = await doOCR(ctx, ctx.message.photo);
   const parsed = parseCaptureText(ctx.message.caption);
-  const sent = await replyFormatFeedback(ctx, ctx.message.message_id, parsed, r === true);
+  const sent = await replyFormatFeedback(ctx, ctx.message.message_id, parsed, r === true, ctx.message.caption || '');
   const botReplyMsgId = sent?.message_id || null;
   console.log(`[FEEDBACK] ${parsed?.isValid ? '✅' : '❌'} Format ${parsed?.formatType || 'unknown'} (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
   if (parsed?.isValid && supabase) {
