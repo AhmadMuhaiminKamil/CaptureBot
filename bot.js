@@ -386,6 +386,21 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
     await supabase.from(tableName).delete()
       .eq('telegram_chat_id', ctx.chat.id)
       .eq('nomor_tiket', rawRow.nomor_tiket);
+  } else if (formatType === 'binding' && rawRow.no_service) {
+    // ponytail: lapsung dedup — same content within 24h = skip insert
+    // ceiling: only checks no_service+clid+alasan; add more cols if needed
+    const since = new Date(Date.now() - 86400000).toISOString();
+    const { data: dup } = await supabase.from(tableName)
+      .select('id').eq('telegram_chat_id', ctx.chat.id)
+      .eq('no_service', rawRow.no_service)
+      .eq('clid_lama', rawRow.clid_lama || null)
+      .eq('clid_baru', rawRow.clid_baru || null)
+      .eq('alasan_binding', rawRow.alasan_binding || null)
+      .gte('created_at', since).limit(1);
+    if (dup?.length) {
+      console.log(`[DB] Skip lapsung duplicate no_service=${rawRow.no_service}`);
+      return;
+    }
   }
 
   const { data, error } = await supabase.from(tableName).insert(row).select().single();
