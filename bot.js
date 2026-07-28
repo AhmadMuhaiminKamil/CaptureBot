@@ -582,8 +582,16 @@ bot.on(["text", "photo"], async (ctx) => {
           await supabase.from(tableName).update({ photo_urls: newUrls }).eq("id", tm.ticket_id);
           console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
         }
-        // Edit bot feedback + update DB worklog jika binding + worklog terdeteksi
-        if (tm.format_type === 'binding' && ocrValid?.valid === true) {
+        // Edit bot feedback + update DB worklog jika binding + worklog REAL terdeteksi
+        const ocrFound = ocrValid?.found || [];
+        const isRealOcr = ocrValid?.valid && ocrFound.some(f => f.startsWith('chat~') || f.startsWith('worklog') || f.startsWith('timemark~') || f.startsWith('context~'));
+        // ponytail: also allow for lapsung (evidence) — check jenis from DB
+        let allowUpdate = isRealOcr;
+        if (!allowUpdate && ocrValid?.valid) {
+          const { data: bt } = await supabase.from('binding_tickets').select('jenis').eq('id', tm.ticket_id).maybeSingle();
+          allowUpdate = bt?.jenis === 'Lapsung';
+        }
+        if (tm.format_type === 'binding' && allowUpdate) {
           await supabase.from('binding_tickets').update({ worklog: 'Ada' }).eq('id', tm.ticket_id);
           const { data: msgs } = await supabase
             .from("capture_ticket_messages")
