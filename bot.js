@@ -131,7 +131,14 @@ async function replyFormatFeedback(ctx, anchorId, parsed, worklogAda, rawText=''
   const warn = checkBindingSpecial(parsed.data?.alasan_binding, rawText);
   if (warn) return await replyTo(ctx, anchorId, `${warn.replace('❌ ', `❌ ${sender} `)} `);
   const evidenceLabel = parsed.data?.jenis === 'Lapsung' ? 'evidence' : 'worklog';
-  const worklogStr = worklogAda ? `(✅ ${evidenceLabel} ada)` : `(❌ ${evidenceLabel} tidak ada)`;
+  // ponytail: for INC (non-lapsung), GPS/ODP photos don't count as worklog — only chat/agentnote/timemark
+  const isLapsung = parsed.data?.jenis === 'Lapsung';
+  const ocrFound = worklogAda?.found || [];
+  const isRealWorklog = worklogAda?.valid && (
+    isLapsung ||
+    ocrFound.some(f => f.startsWith('chat~') || f.startsWith('worklog') || f.startsWith('timemark~') || f.startsWith('context~'))
+  );
+  const worklogStr = isRealWorklog ? `(✅ ${evidenceLabel} ada)` : `(❌ ${evidenceLabel} tidak ada)`;
   return await replyTo(ctx, anchorId, `✅ Format ${formatLabel} valid. ${worklogStr} ${sender}`);
 }
 
@@ -153,17 +160,23 @@ async function doOCR(ctx, photoArray) {
   try {
     const ocrResult = await processPhotoOCR(ctx, photoArray);
     const valid = ocrResult.validation.valid;
-    console.log(`[OCR] valid=${valid} found=${JSON.stringify(ocrResult.validation.found)} textLen=${ocrResult.rawText?.length||0}`);
+    const found = ocrResult.validation.found || [];
+    console.log(`[OCR] valid=${valid} found=${JSON.stringify(found)} textLen=${ocrResult.rawText?.length||0}`);
     if (!valid) console.log(`[OCR] rawText sample: ${ocrResult.rawText?.slice(0,300).replace(/\n/g,' ')}`);
-    return valid;
+    return { valid, found };
   } catch (err) {
     console.error("[OCR] Error:", err);
-    return null;
+    return { valid: null, found: [] };
   }
 }
 
 function hasAnyValid(results) {
-  return results.some(r => r === true);
+  // ponytail: returns merged {valid, found} so callers can distinguish ODP-only from chat/worklog
+  const validResult = results.find(r => r?.valid === true);
+  if (!validResult) return { valid: false, found: [] };
+  // merge all found arrays
+  const allFound = results.flatMap(r => r?.found || []);
+  return { valid: true, found: [...new Set(allFound)] };
 }
 
 // ── COMMANDS ──────────────────────────────────
@@ -376,7 +389,7 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
   // Worklog status (binding only)
   if (formatType === "binding") {
     if (checkBindingSpecial(rawRow.alasan_binding, rawRow.raw_text || '')) return; // ponytail: skip insert if special check fails
-    rawRow.worklog = worklogAda === true ? 'Ada' : 'Tidak Ada';
+    rawRow.worklog = worklogAda?.valid === true ? 'Ada' : 'Tidak Ada';
   }
 
   const row = filterColumnsForFormat(rawRow, formatType);
@@ -463,7 +476,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
     }
     if (parsed) {
       registerPendingFormat(ctx, anchorId, {
-        text: caption, formatType: parsed.formatType, validCount: ocrResults.filter(r => r === true).length,
+        text: caption, formatType: parsed.formatType, validCount: ocrResults.filter(r => r?.valid === true).length,
         totalCount: ocrResults.length, sourceIds: claimed.map(m => m.message_id),
       });
     }
@@ -474,7 +487,7 @@ async function handleForwardedAlbum(ctx, mediaGroupId) {
 async function handleSoloWithCaption(ctx) {
   const r = await doOCR(ctx, ctx.message.photo);
   const parsed = parseCaptureText(ctx.message.caption);
-  const sent = await replyFormatFeedback(ctx, ctx.message.message_id, parsed, r === true, ctx.message.caption || '');
+  const sent = await replyFormatFeedback(ctx, ctx.message.message_id, parsed, r, ctx.message.caption || '');
   const botReplyMsgId = sent?.message_id || null;
   console.log(`[FEEDBACK] ${parsed?.isValid ? '✅' : '❌'} Format ${parsed?.formatType || 'unknown'} (foto+caption) — ${ctx.from.username || ctx.from.first_name}`);
   if (parsed?.isValid && supabase) {
@@ -484,7 +497,7 @@ async function handleSoloWithCaption(ctx) {
   }
   if (parsed) {
     registerPendingFormat(ctx, ctx.message.message_id, {
-      text: ctx.message.caption, formatType: parsed.formatType, validCount: r === true ? 1 : 0, totalCount: 1,
+      text: ctx.message.caption, formatType: parsed.formatType, validCount: r?.valid === true ? 1 : 0, totalCount: 1,
       sourceIds: [ctx.message.message_id],
     });
   }
@@ -559,7 +572,7 @@ bot.on(["text", "photo"], async (ctx) => {
       console.log(`[REPLY PHOTO] Foto reply ke format ${tm.format_type} — ${sender}`);
       try {
         const [ocrValid, url] = await Promise.all([
-          tm.format_type === 'binding' ? doOCR(ctx, ctx.message.photo) : Promise.resolve(null),
+          tm.format_type === 'binding' ? doOCR(ctx, ctx.message.photo) : Promise.resolve({valid:null,found:[]}),
           uploadTelegramPhoto(ctx, ctx.message.photo),
         ]);
         const { data: existingRow } = await supabase
@@ -570,7 +583,7 @@ bot.on(["text", "photo"], async (ctx) => {
           console.log(`[REPLY PHOTO] ✅ Ditambahkan foto ke ${tableName} ID=${tm.ticket_id} (total ${newUrls.length})`);
         }
         // Edit bot feedback + update DB worklog jika binding + worklog terdeteksi
-        if (tm.format_type === 'binding' && ocrValid === true) {
+        if (tm.format_type === 'binding' && ocrValid?.valid === true) {
           await supabase.from('binding_tickets').update({ worklog: 'Ada' }).eq('id', tm.ticket_id);
           const { data: msgs } = await supabase
             .from("capture_ticket_messages")
