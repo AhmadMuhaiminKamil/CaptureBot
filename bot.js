@@ -226,7 +226,7 @@ function checkBindingSpecial(a='', rawText='') {
     if (!(/\bSN\s*LAMA\b/i.test(full) && /\bSN\s*BARU\b/i.test(full)))
       return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
-  if (/pindah\s*odp|pindah\s*port/i.test(full)) {
+  if (/pindah\s*odp\b/i.test(full)) {
     const hasOdpPair = /\bODP\s*LAMA\b/i.test(full) ||
                        /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(full);
     if (!hasOdpPair)
