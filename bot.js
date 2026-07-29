@@ -190,6 +190,25 @@ bot.start((ctx) =>
   )
 );
 
+bot.command("log", async (ctx) => {
+  const noTiket = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!noTiket) return ctx.reply('Usage: /log <nomor_tiket>');
+  if (!supabase) return ctx.reply('DB tidak tersedia.');
+  const { data, error } = await supabase.from('binding_submit_log')
+    .select('telegram_first_name,telegram_username,format_type,no_service,submitted_at')
+    .eq('nomor_tiket', noTiket)
+    .order('submitted_at', { ascending: true });
+  if (error || !data?.length) return ctx.reply(`Tidak ada log untuk tiket: ${noTiket}`);
+  const lines = data.map((r, i) => {
+    const name = r.telegram_first_name || '-';
+    const user = r.telegram_username ? `@${r.telegram_username}` : '-';
+    const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${r.no_service || '-'} | ${time}`;
+  });
+  const msg = `📋 Log tiket: ${noTiket}\n${'─'.repeat(30)}\n${lines.join('\n')}\n${'─'.repeat(30)}\nTotal: ${data.length} submit`;
+  return ctx.reply(msg);
+});
+
 bot.command("cek", (ctx) => {
   ctx.reply("📸 Silakan kirim / forward foto screenshot WorkLog.");
 });
@@ -420,6 +439,16 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
   const { data, error } = await supabase.from(tableName).insert(row).select().single();
   if (error) { console.error(`Supabase insert error (${senderName}):`, error); return; }
   console.log(`[DB] Insert ke ${tableName} ID=${data.id} (${senderName})`);
+  // ponytail: log every submit for spam/history tracking; no delete ever
+  supabase.from('binding_submit_log').insert({
+    telegram_user_id: ctx.from.id,
+    telegram_username: ctx.from.username || null,
+    telegram_first_name: ctx.from.first_name || null,
+    telegram_chat_id: ctx.chat.id,
+    format_type: formatType,
+    no_service: rawRow.no_service || null,
+    nomor_tiket: rawRow.nomor_tiket || null,
+  }).then();
   await registerSubmissionMessages(ctx, data.id, formatType, [...sourceMessageIds]);
 }
 
