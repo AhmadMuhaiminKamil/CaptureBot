@@ -191,21 +191,24 @@ bot.start((ctx) =>
 );
 
 bot.command("log", async (ctx) => {
-  const noTiket = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!noTiket) return ctx.reply('Usage: /log <nomor_tiket>');
+  const arg = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!arg) return ctx.reply('Usage: /log <nomor_tiket> atau /log <no_service>');
   if (!supabase) return ctx.reply('DB tidak tersedia.');
+  // ponytail: INC prefix = nomor_tiket, else = no_service; ceiling: other non-INC tiket formats
+  const isInc = /^INC\d+$/i.test(arg);
   const { data, error } = await supabase.from('binding_submit_log')
-    .select('telegram_first_name,telegram_username,format_type,no_service,submitted_at')
-    .eq('nomor_tiket', noTiket)
+    .select('telegram_first_name,telegram_username,format_type,no_service,nomor_tiket,submitted_at')
+    .eq(isInc ? 'nomor_tiket' : 'no_service', arg)
     .order('submitted_at', { ascending: true });
-  if (error || !data?.length) return ctx.reply(`Tidak ada log untuk tiket: ${noTiket}`);
+  if (error || !data?.length) return ctx.reply(`Tidak ada log untuk: ${arg}`);
   const lines = data.map((r, i) => {
     const name = r.telegram_first_name || '-';
     const user = r.telegram_username ? `@${r.telegram_username}` : '-';
     const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-    return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${r.no_service || '-'} | ${time}`;
+    const tiket = r.nomor_tiket || 'lapsung';
+    return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${tiket} | ${r.no_service || '-'} | ${time}`;
   });
-  const msg = `📋 Log tiket: ${noTiket}\n${'─'.repeat(30)}\n${lines.join('\n')}\n${'─'.repeat(30)}\nTotal: ${data.length} submit`;
+  const msg = `📋 Log: ${arg}\n${'─'.repeat(30)}\n${lines.join('\n')}\n${'─'.repeat(30)}\nTotal: ${data.length} submit`;
   return ctx.reply(msg);
 });
 
