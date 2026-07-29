@@ -435,6 +435,12 @@ async function processCaptureMessage(ctx, text, photoGroups, replyToMessageId, s
       .gte('created_at', since).limit(1);
     if (dup?.length) {
       console.log(`[DB] Skip lapsung duplicate no_service=${rawRow.no_service}`);
+      // ponytail: still log the attempt even when deduped
+      supabase.from('binding_submit_log').insert({
+        telegram_user_id: ctx.from.id, telegram_username: ctx.from.username || null,
+        telegram_first_name: ctx.from.first_name || null, telegram_chat_id: ctx.chat.id,
+        format_type: formatType, no_service: rawRow.no_service || null, nomor_tiket: null,
+      }).then();
       return;
     }
   }
