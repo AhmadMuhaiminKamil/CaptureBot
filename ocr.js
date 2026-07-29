@@ -92,9 +92,10 @@ export function validateWorklog(text) {
   // ponytail: field photo detection — ODP code + date/GPS overlay = telcom field worklog
   // ceiling: false positive if non-field image has ODP text; upgrade if FP rate rises
   // ponytail: ODP typo coverage — OOP, OPP, etc from OCR misread; ceiling: FP if non-field text has "ODP"
-  const hasOdp = /\b[O0][O0P]?DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]|\bO[O0]P[-–./][A-Z]/i.test(text);
+  const hasOdp = /\b[O0][O0P]?DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]|\bO[O0]P[-–./][A-Z]|\b0DP\d+[A-Z]/i.test(text);
   // ponytail: reject REST API diagnostic pages — EQN field contains ODP but it's not a field photo; INETNLOY only on REST pages
-  const isRestApiPage = /NASIPAddress|AcctStartTime|Cek\s*Kualitas|Pengukuran\s*Via\s*Rest|FramedIPAddress|AcctStop|Lost.Carrier|Session.Timeout|Terminate\s*Cause|Status\s*Koneksi|INETNLOY|Related\s*Records|Customer\s*Information|Impacted\s*Service|TTR\s*Customer|Reported\s*Date|Reported\s*Priority/i.test(text);
+  const isRestApiPage = /NASIPAddress|AcctStartTime|Cek\s*Kualitas|Pengukuran\s*Via\s*Rest|FramedIPAddress|AcctStop|Lost.Carrier|Session.Timeout|Terminate\s*Cause|Status\s*Koneksi|Related\s*Records|Customer\s*Information|Impacted\s*Service|TTR\s*Customer|Reported\s*Date|Reported\s*Priority/i.test(text) ||
+    (/INETNLOY/i.test(text) && /Cek\s*Kualitas|NASIPAddress|AcctStartTime|Paket\s*UIM|Status\s*Pelanggan/i.test(text));
   const hasDateOverlay = (
     /\d{4}[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}(?:\s*\(\w+\))?/.test(text) ||
     /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) ||
