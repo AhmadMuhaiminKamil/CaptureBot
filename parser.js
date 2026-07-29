@@ -119,7 +119,7 @@ function parseClid(clidValue) {
   return { valid: true, sto: match[1].toUpperCase() };
 }
 
-const LAPSUNG_ALIASES = ["lapsung", "langsung"];
+const LAPSUNG_ALIASES = ["lapsung", "langsung", "order unspec", "orderunspec", "reboundary", "rebound"];
 const CONTAINS_DIGIT = /\d/;
 
 function parseNoTiket(rawNoTiket) {
