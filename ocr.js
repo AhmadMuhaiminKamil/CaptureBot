@@ -103,7 +103,7 @@ export function validateWorklog(text) {
   );
   const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEWF]|Kota\s+\w|Bant[ea]|Tangeran|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
     || /[2e]camatan/i.test(text);
-  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0i][Mm]|Indnoane|FiComm|\bFTTH\b/i.test(text);
+  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0i][Mm]|Indn[o0]ane|Indt[o0]me|FiComm|\bFTTH\b/i.test(text);
   if (isRestApiPage) return { valid: false, found: [], missing: ['rest_api_page'], rawText: text };
 
   if (hasOdp) {
