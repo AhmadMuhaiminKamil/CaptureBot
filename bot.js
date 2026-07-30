@@ -226,15 +226,16 @@ bot.command("log", async (ctx) => {
   if (cur.length) sessions.push(cur);
 
   const parts = sessions.map((sess, si) => {
-    const orderDate = new Date(sess[0].submitted_at).toLocaleDateString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'Asia/Jakarta' });
+    const orderDate = new Date(sess[0].submitted_at).toLocaleDateString('id-ID', { day:'2-digit', month:'numeric', year:'numeric', timeZone:'Asia/Jakarta' });
     const rows = sess.map((r, i) => {
       const name = r.telegram_first_name || '-';
       const user = r.telegram_username ? `@${r.telegram_username}` : '-';
-      const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', hour:'2-digit', minute:'2-digit' });
-      return `  ${i+1}. ${name} (${user}) — ${time}`;
+      const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      const tiket = r.nomor_tiket || 'lapsung';
+      return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${tiket} | ${r.no_service || '-'} | ${time}`;
     });
     const expired = si < sessions.length - 1 ? ' ✅ expired' : '';
-    return `📅 Order date: ${orderDate}${expired}\n${rows.join('\n')}`;
+    return `📅 Order Date: ${orderDate}${expired}\n${rows.join('\n')}\nTotal: ${sess.length} submit`;
   });
 
   const msg = `📋 Log: ${arg}\n${'─'.repeat(28)}\n${parts.join('\n' + '─'.repeat(28) + '\n')}\n${'─'.repeat(28)}\nTotal sesi: ${sessions.length} | Submit: ${data.length}`;
