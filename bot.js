@@ -194,21 +194,50 @@ bot.command("log", async (ctx) => {
   const arg = ctx.message.text.split(' ').slice(1).join(' ').trim();
   if (!arg) return ctx.reply('Usage: /log <nomor_tiket> atau /log <no_service>');
   if (!supabase) return ctx.reply('DB tidak tersedia.');
-  // ponytail: INC prefix = nomor_tiket, else = no_service; ceiling: other non-INC tiket formats
   const isInc = /^INC\d+$/i.test(arg);
   const { data, error } = await supabase.from('binding_submit_log')
     .select('telegram_first_name,telegram_username,format_type,no_service,nomor_tiket,submitted_at')
     .eq(isInc ? 'nomor_tiket' : 'no_service', arg)
     .order('submitted_at', { ascending: true });
   if (error || !data?.length) return ctx.reply(`Tidak ada log untuk: ${arg}`);
-  const lines = data.map((r, i) => {
-    const name = r.telegram_first_name || '-';
-    const user = r.telegram_username ? `@${r.telegram_username}` : '-';
-    const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-    const tiket = r.nomor_tiket || 'lapsung';
-    return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${tiket} | ${r.no_service || '-'} | ${time}`;
+
+  if (isInc) {
+    // INC: tampil flat
+    const lines = data.map((r, i) => {
+      const name = r.telegram_first_name || '-';
+      const user = r.telegram_username ? `@${r.telegram_username}` : '-';
+      const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      return `${i+1}. ${name} (${user})\n   ${time}`;
+    });
+    return ctx.reply(`📋 Log: ${arg}\n${'─'.repeat(28)}\n${lines.join('\n')}\n${'─'.repeat(28)}\nTotal: ${data.length} submit`);
+  }
+
+  // LAPSUNG: group by 24h session (gap > 24h = new order)
+  const TTL_MS = 24 * 60 * 60 * 1000;
+  const sessions = [];
+  let cur = [];
+  for (const r of data) {
+    if (cur.length && new Date(r.submitted_at) - new Date(cur[cur.length - 1].submitted_at) > TTL_MS) {
+      sessions.push(cur);
+      cur = [];
+    }
+    cur.push(r);
+  }
+  if (cur.length) sessions.push(cur);
+
+  const parts = sessions.map((sess, si) => {
+    const orderDate = new Date(sess[0].submitted_at).toLocaleDateString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'Asia/Jakarta' });
+    const rows = sess.map((r, i) => {
+      const name = r.telegram_first_name || '-';
+      const user = r.telegram_username ? `@${r.telegram_username}` : '-';
+      const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', hour:'2-digit', minute:'2-digit' });
+      return `  ${i+1}. ${name} (${user}) — ${time}`;
+    });
+    const expired = si < sessions.length - 1 ? ' ✅ expired' : '';
+    return `📅 Order date: ${orderDate}${expired}\n${rows.join('\n')}`;
   });
-  const msg = `📋 Log: ${arg}\n${'─'.repeat(30)}\n${lines.join('\n')}\n${'─'.repeat(30)}\nTotal: ${data.length} submit`;
+
+  const msg = `📋 Log: ${arg}\n${'─'.repeat(28)}\n${parts.join('\n' + '─'.repeat(28) + '\n')}\n${'─'.repeat(28)}\nTotal sesi: ${sessions.length} | Submit: ${data.length}`;
   return ctx.reply(msg);
 });
 
