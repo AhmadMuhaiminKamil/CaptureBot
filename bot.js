@@ -202,8 +202,7 @@ bot.command("log", async (ctx) => {
   if (error || !data?.length) return ctx.reply(`Tidak ada log untuk: ${arg}`);
 
   if (isInc) {
-    // INC: tampil flat
-    const lines = data.map((r, i) => {
+    const lines = data.reverse().map((r, i) => {
       const name = r.telegram_first_name || '-';
       const user = r.telegram_username ? `@${r.telegram_username}` : '-';
       const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
@@ -224,8 +223,10 @@ bot.command("log", async (ctx) => {
     cur.push(r);
   }
   if (cur.length) sessions.push(cur);
+  sessions.reverse(); // terbaru di atas
 
   const parts = sessions.map((sess, si) => {
+    sess.reverse(); // terbaru di atas dalam sesi
     const orderDate = new Date(sess[0].submitted_at).toLocaleDateString('id-ID', { day:'2-digit', month:'numeric', year:'numeric', timeZone:'Asia/Jakarta' });
     const rows = sess.map((r, i) => {
       const name = r.telegram_first_name || '-';
@@ -234,7 +235,7 @@ bot.command("log", async (ctx) => {
       const tiket = r.nomor_tiket || 'lapsung';
       return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${tiket} | ${r.no_service || '-'} | ${time}`;
     });
-    const expired = si < sessions.length - 1 ? ' ✅ expired' : '';
+    const expired = si > 0 ? ' ✅ expired' : ''; // setelah reverse, si>0 = sesi lama
     return `📅 Order Date: ${orderDate}${expired}\n${rows.join('\n')}\nTotal: ${sess.length} submit`;
   });
 
