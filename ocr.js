@@ -103,12 +103,13 @@ export function validateWorklog(text) {
   );
   const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEWF]|Kota\s+\w|Bant[ea]|Tangeran|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
     || /[2e]camatan/i.test(text);
-  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0][Mm]|FiComm|\bFTTH\b/i.test(text);
+  const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0i][Mm]|Indnoane|FiComm|\bFTTH\b/i.test(text);
   if (isRestApiPage) return { valid: false, found: [], missing: ['rest_api_page'], rawText: text };
 
   if (hasOdp) {
     found.push('odp~detected', 'odp~field');
-  } else if ((hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField)) {
+  } else if ((hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField) ||
+             (hasTelkomField && timestampMatches >= 1)) {
     found.push('odp~detected', 'odp~field');
   }
   // ponytail: 2+ distinct strong GPS keywords = field photo even without date/telkom
