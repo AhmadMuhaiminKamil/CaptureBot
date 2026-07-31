@@ -119,7 +119,8 @@ export function validateWorklog(text) {
   }
   // ceiling: false positive if unrelated image has "timemark" text; upgrade if needed
   if (/timemark|foto\s*\d*%?\s*akurat|akurat/i.test(text) ||
-      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text))) {
+      (/description/i.test(text) && /agentnote|attachment|sans.?serif|normal/i.test(text)) ||
+      (/AGENTNOT/i.test(text) && /Attachment|Sans.?Serif|Drop files/i.test(text))) {
     found.push('timemark~detected', 'timemark~verified');
   }
 
