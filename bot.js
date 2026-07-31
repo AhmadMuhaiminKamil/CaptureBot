@@ -562,7 +562,7 @@ async function handleSoloWithCaption(ctx) {
   if (parsed?.isValid && supabase) {
     const sourceIds = [ctx.message.message_id];
     if (botReplyMsgId) sourceIds.push(botReplyMsgId);
-    await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds, r === true).catch(e => console.error("DB err:", e));
+    await processCaptureMessage(ctx, ctx.message.caption, [ctx.message.photo], ctx.message.message_id, sourceIds, r).catch(e => console.error("DB err:", e));
   }
   if (parsed) {
     registerPendingFormat(ctx, ctx.message.message_id, {
