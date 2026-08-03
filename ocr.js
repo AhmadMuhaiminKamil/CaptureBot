@@ -92,21 +92,27 @@ export function validateWorklog(text) {
   // ponytail: field photo detection — ODP code + date/GPS overlay = telcom field worklog
   // ceiling: false positive if non-field image has ODP text; upgrade if FP rate rises
   // ponytail: ODP typo coverage — OOP, OPP, etc from OCR misread; ceiling: FP if non-field text has "ODP"
-  const hasOdp = /\b[O0][O0P]?DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bOPP_[A-Z]|o[Dd][Pp][A-Z]+[-/]|\bO[O0]P[-–./][A-Z]|\b0DP\d+[A-Z]|\bODP\s+INI\s+SU[DH]A[NM]?\s+DI\s+VALIDASI/i.test(text);
+  const hasOdp = /\b[O0][O0P]?DP[-–./][A-Z]|\bODP\s+[-–]\s*[A-Z]|[O0]DP[A-Z]{2,}|OBPTEE|ODPIREF|\bO[OP]P[_-]?[A-Z]?|o[Dd][Pp][A-Z]+[-/]|\bO[O0]P[-–./][A-Z]|\b0DP\d+[A-Z]|\b0{2}P[A-Z0-9]|\bP[-–]?TBE[-–/][A-Z0-9]|\bOPR[A-Z]?\d{2,}|\bODP\s+INI\s+SU[DH]A[NM]?\s+DI\s+VALIDASI/i.test(text);
+  // ponytail: ODP box often tears Telkom brand + an optical/cabinet term but no GPS/date; treat as field photo
+  // ceiling: any Telkom-branded shot with a fiber term could false-positive; acceptable for field capture
+  const hasTelkomFuzzy = /Telkom|Telekomm|Telko[em]|Telkon|TELKOM/i.test(text);
+  const hasFiberTerm = /\b(ODP|ODC|CORE\s*\d|PASSIVE|SPLITTER|VAL[IJZ]DA[SMIO]|OPTICAL|FIBER|DS\s*\.?\s*0?\d|TRANS\s*DATA)\b/i.test(text);
+  const isOdpBox = hasOdp || (hasTelkomFuzzy && hasFiberTerm);
   // ponytail: reject REST API diagnostic pages — EQN field contains ODP but it's not a field photo; INETNLOY only on REST pages
   const isRestApiPage = /NASIPAddress|AcctStartTime|Cek\s*Kualitas|Pengukuran\s*Via\s*Rest|FramedIPAddress|AcctStop|Lost.Carrier|Session.Timeout|Terminate\s*Cause|Status\s*Koneksi|Related\s*Records|Customer\s*Information|Impacted\s*Service|TTR\s*Customer|Reported\s*Date|Reported\s*Priority/i.test(text) ||
     (/INETNLOY/i.test(text) && /Cek\s*Kualitas|NASIPAddress|AcctStartTime|Paket\s*UIM|Status\s*Pelanggan/i.test(text));
   const hasDateOverlay = (
     /\d{4}[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}(?:\s*\(\w+\))?/.test(text) ||
+    /\d{1,2}[-./]\d{1,2}[-./]\d{4}/.test(text) ||
     /[0-9]{1,2}\s*(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|Aug(?:ust)?|Oct(?:ober)?)\s*\d{4}/i.test(text) ||
     /\d{1,2}:\d{2}\s*[|]\s*\d{1,2}\s+\w+\s+\d{4}/.test(text)
   );
-  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEWF]|Kota\s+\w|Bant[ea]|Tangeran|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
+  const hasGpsOrAddr = /\b(Latitude|Longitude|Lat\s+[-\d]|Long\s+[1]|Koordinat|Kecamatan|Kelurahan|[Jj][Ll]\.|Jalan|°[NS]|°[EW]|\d+\.\d+°[NSEWF]|\b-?6\.\d{3,}\s*,\s*1\d{2}\.\d{3,}|Kota\s+\w|Bant[ea]|Tangeran|Bogor|Bekasi|Depok|Telkom\s*[Aa]kses)\b/i.test(text)
     || /[2e]camatan/i.test(text);
   const hasTelkomField = /Telkom|Western\s*Technolog|Optic\s*Distribution|IndiH[o®0i][Mm]|Indn[o0]ane|Indt[o0]me|FiComm|\bFTTH\b/i.test(text);
   if (isRestApiPage) return { valid: false, found: [], missing: ['rest_api_page'], rawText: text };
 
-  if (hasOdp) {
+  if (isOdpBox) {
     found.push('odp~detected', 'odp~field');
   } else if ((hasDateOverlay && hasGpsOrAddr) || (hasDateOverlay && hasTelkomField) || (hasGpsOrAddr && hasTelkomField) ||
              (hasTelkomField && timestampMatches >= 1)) {
@@ -166,8 +172,8 @@ async function preprocessImage(imageBytes) {
     let pipeline = sharp(resized).extract(zone);
     if (isBottomStrip) pipeline = pipeline.resize(zone.width * 2, zone.height * 2);
     // ponytail: no negate — causes regression on normal-overlay photos
-    const buf = await pipeline.sharpen().sharpen().grayscale().png().toBuffer();
-    buffers.push(buf);
+    const normal = await pipeline.sharpen().sharpen().grayscale().png().toBuffer();
+    buffers.push(normal);
   }
   return buffers;
 }
@@ -254,42 +260,45 @@ async function getPaddleOcr() {
 }
 
 export async function extractTextFromImage(imageBytes) {
-  // ponytail: resize before PaddleOCR to limit ONNX inference time on Vercel
-  const MAX_DIM = 1200;
+  // ponytail: resize first for speed; uncertain field labels get one original-resolution retry.
   const resized = await sharp(imageBytes)
-    .resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true })
+    .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
     .jpeg({ quality: 90 })
     .toBuffer();
-  const ab = resized.buffer.slice(resized.byteOffset, resized.byteOffset + resized.byteLength);
+  let paddleText = '';
   try {
     const svc = await getPaddleOcr();
-    const result = await svc.recognize(ab);
-    const text = result.text || '';
-    console.log('[OCR] PaddleOCR result length:', text.length);
-    if (text.length >= 30) return text;
-    // ponytail: fallback to Tesseract zone-crop when PaddleOCR yields too little text
-    // ceiling: adds ~3s per call; remove if PaddleOCR model improves on outdoor photos
-    console.log('[OCR] Short result, trying Tesseract fallback...');
+    for (const image of [resized, imageBytes]) {
+      const ab = image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength);
+      const text = (await svc.recognize(ab)).text || '';
+      paddleText += `\n${text}`;
+      if (validateWorklog(paddleText).valid) {
+        console.log('[OCR] PaddleOCR result length:', paddleText.length);
+        return paddleText.trim();
+      }
+    }
+    console.log('[OCR] PaddleOCR uncertain length:', paddleText.length);
   } catch (err) {
     console.error('[OCR] PaddleOCR failed:', err.message);
   }
-  // Tesseract zone-crop fallback
+
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
     const corePath = await ensureCorePath();
     const worker = await createWorker('eng', 1, { logger: () => {}, corePath });
-    let allText = '';
+    let tesseractText = '';
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
-        allText += ' ' + text;
+        tesseractText += `\n${text}`;
       }
     } finally { await worker.terminate(); }
-    console.log('[OCR] Tesseract fallback result length:', allText.length);
-    return allText.trim();
+    const combined = `${paddleText}\n${tesseractText}`.trim();
+    console.log('[OCR] Combined fallback result length:', combined.length);
+    return combined;
   } catch (err) {
     console.error('[OCR] Tesseract fallback failed:', err.message);
-    return '';
+    return paddleText.trim();
   }
 }
 
