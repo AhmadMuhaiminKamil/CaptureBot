@@ -127,7 +127,8 @@ function parseNoTiket(rawNoTiket) {
 
   const normalized = rawNoTiket.trim().toLowerCase();
 
-  if (LAPSUNG_ALIASES.includes(normalized)) {
+  // ponytail: prefix match — "lapsung ajudan wamenlu", "langsung vip" etc still count as Lapsung
+  if (LAPSUNG_ALIASES.some((a) => normalized === a || normalized.startsWith(a + " "))) {
     return { jenis: "Lapsung", nomor_tiket: null };
   } else if (CONTAINS_DIGIT.test(rawNoTiket)) {
     return { jenis: "Tiket", nomor_tiket: rawNoTiket };
