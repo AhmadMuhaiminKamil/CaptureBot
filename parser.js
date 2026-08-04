@@ -110,7 +110,8 @@ function stripInstructionalHeaders(text) {
   return { cleaned, inlineDomain, hasClidHeader };
 }
 
-const CLID_FORMAT_REGEX = /^GPON\s*\d+\s*-\s*[A-Za-z0-9]+\s*-\s*([A-Za-z]+)\s*-\s*\d+/i;
+// ponytail: tolerate GGPON/MSAN typos — match G?GPON or MSAN prefix, capture STO from 3rd segment
+const CLID_FORMAT_REGEX = /^G*(?:PON|MSAN)\s*\d+\s*-\s*[A-Za-z0-9]+\s*-\s*([A-Za-z]+)\s*-\s*\d+/i;
 
 function parseClid(clidValue) {
   if (!clidValue) return { valid: false, sto: null };

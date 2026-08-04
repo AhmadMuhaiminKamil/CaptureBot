@@ -20,6 +20,27 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// ponytail: pre-seed botInfo so Telegraf never blocks on getMe() at cold start.
+// A getMe ETIMEDOUT was dropping whole webhook updates (bot silent). id (token
+// prefix) + is_bot are all update routing needs. username is used only to match
+// "/cmd@username" in groups — seed it from BOT_USERNAME when set, else refresh
+// it best-effort via getMe without ever throwing (a failure just leaves the
+// placeholder; bare "/cmd" still works).
+bot.botInfo = {
+  id: Number(BOT_TOKEN.split(":")[0]) || 0,
+  is_bot: true,
+  first_name: process.env.BOT_USERNAME || "bot",
+  username: process.env.BOT_USERNAME || "bot",
+  can_join_groups: true,
+  can_read_all_group_messages: false,
+  supports_inline_queries: false,
+};
+if (!process.env.BOT_USERNAME) {
+  bot.telegram.getMe()
+    .then((me) => { bot.botInfo = me; })
+    .catch((e) => console.warn("getMe refresh failed (using placeholder botInfo):", e.message));
+}
+
 let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
