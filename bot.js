@@ -654,12 +654,14 @@ bot.on(["text", "photo"], async (ctx) => {
         // Edit bot feedback + update DB worklog jika binding + worklog REAL terdeteksi
         const ocrFound = ocrValid?.found || [];
         const isRealOcr = ocrValid?.valid && ocrFound.some(f => f.startsWith('chat~') || f.startsWith('worklog') || f.startsWith('timemark~') || f.startsWith('context~'));
-        // ponytail: also allow for lapsung (evidence) — check jenis from DB
-        let allowUpdate = isRealOcr;
-        if (!allowUpdate && ocrValid?.valid) {
+        // ponytail: jenis from DB drives both lapsung-evidence gate and the label word
+        let btJenis = null;
+        if (tm.format_type === 'binding' && ocrValid?.valid) {
           const { data: bt } = await supabase.from('binding_tickets').select('jenis').eq('id', tm.ticket_id).maybeSingle();
-          allowUpdate = bt?.jenis === 'Lapsung';
+          btJenis = bt?.jenis || null;
         }
+        const isLapsung = btJenis === 'Lapsung';
+        const allowUpdate = isRealOcr || isLapsung;
         if (tm.format_type === 'binding' && allowUpdate) {
           await supabase.from('binding_tickets').update({ worklog: 'Ada' }).eq('id', tm.ticket_id);
           const { data: msgs } = await supabase
@@ -673,9 +675,9 @@ bot.on(["text", "photo"], async (ctx) => {
           if (botMsgId) {
             const senderTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
             await ctx.telegram.editMessageText(ctx.chat.id, botMsgId, null,
-              `✅ Format Binding valid. (✅ ${/lapsung/i.test(tm.ticket_id) ? 'evidence' : 'worklog'} ada) ${senderTag}`
+              `✅ Format Binding valid. (✅ ${isLapsung ? 'evidence' : 'worklog'} ada) ${senderTag}`
             ).catch(() => {}); // silent if edit fails (too old, etc)
-            console.log(`[REPLY PHOTO] ✏️ Edited bot msg ${botMsgId} → worklog ada`);
+            console.log(`[REPLY PHOTO] ✏️ Edited bot msg ${botMsgId} → ${isLapsung ? 'evidence' : 'worklog'} ada`);
           }
         }
       } catch (err) {
