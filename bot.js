@@ -660,7 +660,7 @@ bot.on(["text", "photo"], async (ctx) => {
           const { data: bt } = await supabase.from('binding_tickets').select('jenis').eq('id', tm.ticket_id).maybeSingle();
           btJenis = bt?.jenis || null;
         }
-        const isLapsung = btJenis === 'Lapsung';
+        const isLapsung = /^lapsung\b/i.test(btJenis || '');
         const allowUpdate = isRealOcr || isLapsung;
         if (tm.format_type === 'binding' && allowUpdate) {
           await supabase.from('binding_tickets').update({ worklog: 'Ada' }).eq('id', tm.ticket_id);
