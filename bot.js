@@ -301,8 +301,21 @@ function checkBindingSpecial(a='', rawText='') {
       return '❌ Mohon Sertakan:\nSN Lama:\nSN Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
   if (/pindah\s*odp\b/i.test(full)) {
-    const hasOdpPair = /\bODP\s*LAMA\b/i.test(full) ||
-                       /\bdari\s+ODP[-\w/]+\s+ke\s+ODP[-\w/]+/i.test(full);
+    // ponytail: split on separators/keywords first, then find one ODP code per
+    // chunk — 2+ distinct codes = pair given, whatever the layout (labels,
+    // "dari X ke Y", "pindah ke:", arrows, commas, bare newlines).
+    // ceiling: assumes codes aren't split across chunks; fine for real formats.
+    const odpCodes = new Set(
+      full
+        .split(/[\n,;]+|\s*(?:->|=>|→)\s*|\b(?:ke|kepada|menjadi|jadi|dari|pindah|ganti)\b/gi)
+        .map(chunk => {
+          const cleaned = chunk.replace(/\bodp\s*(?:lama|baru|awal|akhir|asal|tujuan)\s*:?/gi, ' ');
+          const hit = cleaned.match(/\bodp[-\x20\t]*[a-z][a-z0-9]*(?:[-/\x20\t]+[a-z0-9]+)*/i);
+          return hit ? hit[0].toLowerCase().replace(/[\x20\t]+/g, '-').replace(/[-/]+$/, '') : null;
+        })
+        .filter(code => code && /\d/.test(code))
+    );
+    const hasOdpPair = odpCodes.size >= 2;
     if (!hasOdpPair)
       return '❌ Mohon Sertakan:\nODP Lama:\nODP Baru:\nSilahkan Tambahkan di Alasan Binding';
   }
