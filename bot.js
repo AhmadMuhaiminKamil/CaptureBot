@@ -227,7 +227,7 @@ bot.command("log", async (ctx) => {
       const name = r.telegram_first_name || '-';
       const user = r.telegram_username ? `@${r.telegram_username}` : '-';
       const time = new Date(r.submitted_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-      return `${i+1}. ${name} (${user})\n   ${time}`;
+      return `${i+1}. ${name} (${user})\n   ${r.format_type} | ${r.nomor_tiket || arg} | ${r.no_service || '-'} | ${time}`;
     });
     return ctx.reply(`📋 Log: ${arg}\n${'─'.repeat(28)}\n${lines.join('\n')}\n${'─'.repeat(28)}\nTotal: ${data.length} submit`);
   }
