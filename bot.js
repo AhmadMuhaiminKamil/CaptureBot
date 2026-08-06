@@ -825,6 +825,13 @@ bot.on("edited_message", async (ctx) => {
         if (parsed.data?.alasan_binding) {
           await supabase.from('binding_tickets').update({ alasan_binding: parsed.data.alasan_binding }).eq('id', tm.ticket_id);
           console.log(`[EDIT] Updated alasan_binding ticket ${tm.ticket_id}`);
+          // ponytail: log the in-place edit (this branch UPDATEs, doesn't call processCaptureMessage which logs)
+          supabase.from('binding_submit_log').insert({
+            telegram_user_id: ctx.from.id, telegram_username: ctx.from.username || null,
+            telegram_first_name: ctx.from.first_name || null, telegram_chat_id: ctx.chat.id,
+            format_type: parsed.formatType, no_service: parsed.data?.no_service || null,
+            nomor_tiket: parsed.data?.nomor_tiket || null,
+          }).then();
         }
         // clean up warn entry if any
         if ((parsed.data?.nomor_tiket || parsed.data?.no_service)) {
